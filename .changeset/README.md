@@ -1,7 +1,7 @@
 # 发版流程
 
 使用 Changesets 标准流程：开发 PR 记录变更，自动生成 Release PR，合并 Release PR 后发布 npm 和 GitHub Release。
-自定义脚本只负责 Release PR 的标题和正文排版。
+自定义脚本只负责 Release PR 的标题和正文排版。版本准备、npm 发布及 PR 排版命令均在工作流中配置，根配置不再提供对应任务。
 
 ## 1. 记录变更
 
@@ -45,7 +45,7 @@ beta 版本使用 npm 的 beta 标签。GitHub Release 使用 Changesets 默认�
 
 ```sh
 vp exec changeset status --output .git/release-status.json
-vp run release-pr --status .git/release-status.json --pr 123 --dry-run
+vp exec oxnode scripts/release-pr.ts --status .git/release-status.json --pr 123 --dry-run
 ```
 
 省略 `--dry-run` 会更新该 PR 的标题和正文，需要 GitHub CLI 登录或 GH_TOKEN。日常发版不需要本地执行此脚本。

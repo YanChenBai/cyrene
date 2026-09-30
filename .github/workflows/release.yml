@@ -56,8 +56,10 @@ jobs:
         id: changesets
         uses: changesets/action@v2
         with:
-          version-script: vp run version-packages
-          publish-script: vp run release
+          version-script: >-
+            bash -c "vp exec changeset status --output .git/release-status.json && vp exec changeset version && vp install --lockfile-only"
+          publish-script: >-
+            bash -c "vp run -r build && vp exec changeset publish"
           commit-message: 'chore(release): version packages'
           pr-title: 'release: packages'
           create-github-releases: true
@@ -67,7 +69,7 @@ jobs:
 
       - name: Format release PR title and body with Changesets summaries
         if: steps.changesets.outputs.pr-number != ''
-        run: vp run release-pr --status .git/release-status.json --pr "$RELEASE_PR_NUMBER"
+        run: vp exec oxnode scripts/release-pr.ts --status .git/release-status.json --pr "$RELEASE_PR_NUMBER"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_PR_NUMBER: ${{ steps.changesets.outputs.pr-number }}

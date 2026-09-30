@@ -114,23 +114,4 @@ export default defineConfig({
   test: {
     projects: ['packages/*', 'scripts'],
   },
-
-  run: {
-    cache: true,
-    tasks: {
-      'version-packages': {
-        command:
-          'changeset status --output .git/release-status.json && changeset version && vp install --lockfile-only',
-        cache: false,
-      },
-      release: {
-        command: 'vp run -r build && changeset publish',
-        cache: false,
-      },
-      'release-pr': {
-        command: 'oxnode scripts/release-pr.ts',
-        cache: false,
-      },
-    },
-  },
 });

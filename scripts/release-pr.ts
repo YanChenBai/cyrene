@@ -170,7 +170,9 @@ export function main(args = process.argv.slice(2)) {
     !statusPath ||
     statusPath.startsWith('--')
   ) {
-    throw new Error('Usage: vp run release-pr --pr <number> --status <file> [--dry-run]');
+    throw new Error(
+      'Usage: vp exec oxnode scripts/release-pr.ts --pr <number> --status <file> [--dry-run]',
+    );
   }
 
   const status = JSON.parse(readFileSync(resolve(root, statusPath), 'utf8')) as ChangesetStatus;
