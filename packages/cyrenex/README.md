@@ -52,6 +52,28 @@ await app.dispose();
 - **延迟解析** - `lazy()` 提供解析句柄, 按目标生命周期创建实例
 - **统一清理** - 按首次创建完成的逆序释放资源, 支持 Symbol 清理协议和 `await using`
 
+## 统一初始化
+
+可以继续按需解析，也可以在开始接收请求或运行任务前显式预热：
+
+```ts
+const app = new Cyrene().use(Service);
+try {
+  await app.init();
+  // 所有可达 singleton 已就绪，可以开始业务工作。
+} finally {
+  await app.dispose();
+}
+```
+
+`init(): Promise<void>` 初始化整个有效依赖图中的 singleton，包括内部依赖和 lazy 目标；复用已经开始或完成的初始化。
+它不额外预创建 transient，但 singleton 的强依赖仍按正常规则创建 transient，以 override 后的 lifetime 为准。
+
+调用时立即锁定配置，先校验完整依赖图，再并发启动独立分支。重复调用复用同一个 Promise，包括失败结果。
+所有批次分支结束后才报告失败，不自动回滚或重试；失败后仍需 `dispose()` 清理资源。
+`dispose()` 会等待已接受的初始化批次，关闭开始后调用 `init()` 返回拒绝的 Promise。
+不要在工厂中等待同一容器的 `init()`，否则会等待自身完成。
+
 ## 声明与实例
 
 **先声明, 再注册, 按需解析**
@@ -131,7 +153,7 @@ app.resolve(Config) === app.resolve(MockConfig); // 同一单例
 
 - **保持不变** — 原 key、公开范围、返回值与同步 / 异步契约
 - **使用替身** — 工厂、依赖与 `lifetime`
-- **锁定时机** — 第一次读取属性或调用 `resolve()`, 即使解析失败也不解锁
+- **锁定时机** — 第一次读取属性、调用 `resolve()` 或 `init()`, 即使初始化失败也不解锁
 
 <details>
 <summary>覆盖顺序与可达性</summary>
@@ -174,7 +196,7 @@ users.list();
 
 ## 延迟解析
 
-`lazy()` 注入解析句柄, 调用 `resolve()` 时才创建目标:
+按需解析时，`lazy()` 注入解析句柄，调用句柄的 `resolve()` 时创建目标；`init()` 也会主动初始化其中的 singleton：
 
 ```ts
 import { lazy, ripple } from 'cyrenex';
