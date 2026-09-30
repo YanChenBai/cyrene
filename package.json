@@ -1,0 +1,42 @@
+{
+  "name": "@cyrenex/monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for Cyrene",
+  "homepage": "https://github.com/YanChenBai/cyrene#readme",
+  "bugs": {
+    "url": "https://github.com/YanChenBai/cyrene/issues"
+  },
+  "license": "MIT",
+  "author": "byc <bycrxemail@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YanChenBai/cyrene.git"
+  },
+  "scripts": {
+    "prepare": "vp config",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "catalog:",
+    "@changesets/cli": "catalog:",
+    "@oxc-node/cli": "catalog:",
+    "@stylistic/eslint-plugin": "catalog:",
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "pkg-pr-new": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.6.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}
