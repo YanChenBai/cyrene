@@ -1,6 +1,6 @@
 {
   "name": "cyrenex",
-  "version": "0.0.0",
+  "version": "0.0.1-beta.0",
   "description": "A declarative, type-safe dependency graph runtime for TypeScript with async initialization and resource disposal",
   "keywords": [
     "async-initialization",
