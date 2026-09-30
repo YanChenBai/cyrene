@@ -43,5 +43,8 @@ test('formats the release PR with package versions, highlights and upgrade comma
   assert.match(pr, /Human-written summary\.\n\nMigration instructions/);
   assert.match(pr, /`0.0.3` → `1.0.0-beta.0`/);
   assert.match(pr, /npm install cyrenex@1.0.0-beta.0/);
-  assert.match(pr, /Merging this PR/);
+  assert.match(
+    pr,
+    /After merging this PR, manually run the CI and Release workflow on main to publish/,
+  );
 });
