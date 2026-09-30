@@ -126,10 +126,6 @@ export default defineConfig({
         command: 'vp run -r build && changeset publish',
         cache: false,
       },
-      'release-notes': {
-        command: 'oxnode scripts/release-notes.ts',
-        cache: false,
-      },
       'release-pr': {
         command: 'oxnode scripts/release-pr.ts',
         cache: false,

@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,28 +29,6 @@ const gh = (...args: string[]) =>
     cwd: root,
     encoding: 'utf8',
   }).trim();
-
-const vp = (...args: string[]) =>
-  execFileSync('vp', args, {
-    cwd: root,
-    encoding: 'utf8',
-  }).trim();
-
-function readChangesetStatus(): ChangesetStatus {
-  const directory = mkdtempSync(join(tmpdir(), 'cyrene-release-'));
-  const path = join(directory, 'status.json');
-
-  try {
-    vp('exec', 'changeset', 'status', '--output', path);
-
-    return JSON.parse(readFileSync(path, 'utf8')) as ChangesetStatus;
-  } finally {
-    rmSync(directory, {
-      recursive: true,
-      force: true,
-    });
-  }
-}
 
 function readPackages(): PackageInfo[] {
   return readdirSync(join(root, 'packages'), {
@@ -153,21 +130,6 @@ function readContributors(releases: Release[], packages: PackageInfo[]) {
   return [...contributors].sort((a, b) => a.localeCompare(b));
 }
 
-function createTitle(releases: Release[]) {
-  const versions = new Set(releases.map(release => release.newVersion));
-
-  if (versions.size === 1) {
-    const [version] = versions;
-    const packages = releases.map(release => release.name).join(', ');
-
-    return `chore(release): prepare ${packages} v${version}`;
-  }
-
-  const packages = releases.map(release => `${release.name}@${release.newVersion}`).join(', ');
-
-  return `chore(release): prepare ${packages}`;
-}
-
 function createCompareUrl(previousTag: string, branch: string) {
   const base = encodeURIComponent(previousTag);
   const head = encodeURIComponent(branch);
@@ -192,67 +154,26 @@ function createBody(
     changes: formatChangesetSummaries(status, releases),
     compareUrl: createCompareUrl(previousTag ?? baseBranch, branch),
     contributors,
-    isPullRequest: true,
   });
 }
 
-function findExistingPullRequest(branch: string) {
-  const result = gh(
-    'pr',
-    'list',
-    '--base',
-    baseBranch,
-    '--head',
-    branch,
-    '--state',
-    'open',
-    '--json',
-    'number',
-    '--jq',
-    '.[0].number // empty',
-  );
-
-  return result ? Number(result) : undefined;
-}
-
-function ensureBranchPushed(branch: string) {
-  const remote = git('ls-remote', '--heads', 'origin', branch);
-
-  if (!remote) {
-    throw new Error(`Branch "${branch}" has not been pushed to origin.`);
-  }
-}
-
-function main() {
-  const args = process.argv.slice(2);
+export function main(args = process.argv.slice(2)) {
   const preview = args.includes('--dry-run');
-  const prIndex = args.indexOf('--pr');
-  const pullRequest = prIndex >= 0 ? args[prIndex + 1] : undefined;
-  const statusIndex = args.indexOf('--status');
-  const statusPath = statusIndex >= 0 ? args[statusIndex + 1] : undefined;
+  const pr = args[args.indexOf('--pr') + 1];
+  const statusPath = args[args.indexOf('--status') + 1];
 
-  const branch = pullRequest
-    ? gh(
-        'pr',
-        'view',
-        pullRequest,
-        '--repo',
-        repository,
-        '--json',
-        'headRefName',
-        '--jq',
-        '.headRefName',
-      )
-    : git('branch', '--show-current');
-
-  if (!branch || branch === baseBranch) {
-    throw new Error(`Release PR requires a non-${baseBranch} branch.`);
+  if (
+    !args.includes('--pr') ||
+    !pr ||
+    !/^\d+$/.test(pr) ||
+    !args.includes('--status') ||
+    !statusPath ||
+    statusPath.startsWith('--')
+  ) {
+    throw new Error('Usage: vp run release-pr --pr <number> --status <file> [--dry-run]');
   }
 
-  const status: ChangesetStatus = statusPath
-    ? JSON.parse(readFileSync(statusPath, 'utf8'))
-    : readChangesetStatus();
-
+  const status = JSON.parse(readFileSync(resolve(root, statusPath), 'utf8')) as ChangesetStatus;
   const packages = readPackages();
 
   const releases = status.releases.filter(
@@ -264,40 +185,37 @@ function main() {
     throw new Error('No public packages are scheduled for release.');
   }
 
+  const branch = gh(
+    'pr',
+    'view',
+    pr,
+    '--repo',
+    repository,
+    '--json',
+    'headRefName',
+    '--jq',
+    '.headRefName',
+  );
+
   const contributors = preview ? [] : readContributors(releases, packages);
-  const title = createTitle(releases);
+  const title = `release: ${releases.map(release => `${release.name}@${release.newVersion}`).join(', ')}`;
   const body = createBody(status, releases, contributors, branch);
 
   if (preview) {
-    process.stdout.write(body);
+    process.stdout.write(`${title}\n\n${body}`);
 
     return;
   }
 
-  ensureBranchPushed(branch);
-
-  const existing = pullRequest ?? findExistingPullRequest(branch);
-  const directory = mkdtempSync(join(tmpdir(), 'cyrene-release-pr-'));
-  const bodyPath = join(directory, 'body.md');
-
-  try {
-    writeFileSync(bodyPath, body);
-
-    const command = existing
-      ? ['pr', 'edit', String(existing)]
-      : ['pr', 'create', '--base', baseBranch, '--head', branch];
-
-    execFileSync(
-      'gh',
-      [...command, '--repo', repository, '--title', title, '--body-file', bodyPath],
-      {
-        cwd: root,
-        stdio: 'inherit',
-      },
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  execFileSync(
+    'gh',
+    ['pr', 'edit', pr, '--repo', repository, '--title', title, '--body-file', '-'],
+    {
+      cwd: root,
+      input: body,
+      stdio: ['pipe', 'inherit', 'inherit'],
+    },
+  );
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

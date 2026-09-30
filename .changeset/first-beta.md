@@ -1,6 +1,6 @@
 ---
-"cyrenex": major
-"@cyrenex/elysia": major
+"cyrenex": patch
+"@cyrenex/elysia": patch
 ---
 
 First beta release of Cyrene and its Elysia integration.
