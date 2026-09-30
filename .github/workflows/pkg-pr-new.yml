@@ -30,5 +30,11 @@ jobs:
       - name: Build packages
         run: vp run -r build
 
+      - name: Format, lint and typecheck
+        run: vp check
+
+      - name: Test
+        run: vp test run
+
       - name: Publish preview packages
         run: vp exec pkg-pr-new publish './packages/*' --pnpm
