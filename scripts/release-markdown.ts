@@ -31,7 +31,7 @@ export function formatReleaseMarkdown(options: {
   sections.push(`**Full Changelog**: [Compare changes](${compareUrl})`);
 
   sections.push(
-    '---\n\nAfter merging this PR, manually run the CI and Release workflow on main to publish.',
+    '---\n\nAfter merging this PR, manually run the Release workflow on main to publish.',
   );
 
   return `${sections.join('\n\n')}\n`;
