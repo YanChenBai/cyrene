@@ -1,7 +1,14 @@
 name: CI
 
 on:
-  workflow_call:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
