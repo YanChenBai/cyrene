@@ -1,7 +1,11 @@
 name: Preview Packages
 
 on:
-  workflow_call:
+  pull_request:
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   publish-preview:

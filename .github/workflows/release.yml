@@ -8,16 +8,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ci:
-    name: CI
-    if: github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
   release:
     name: Release
-    needs: ci
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -41,6 +33,15 @@ jobs:
 
       - name: Install dependencies
         run: vp install --frozen-lockfile
+
+      - name: Build packages
+        run: vp run -r build
+
+      - name: Format, lint and typecheck
+        run: vp check
+
+      - name: Test
+        run: vp test run
 
       - name: Create Release PR or publish to npm
         id: changesets
