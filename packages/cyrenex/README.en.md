@@ -52,6 +52,28 @@ Synchronous services return instances directly; asynchronous services return pro
 - **Lazy dependencies** — Inject a resolution handle with `lazy()`, respecting the target lifetime.
 - **Resource disposal** — Dispose in reverse completion order through Symbol disposal protocols or `await using`.
 
+## Eager initialization
+
+Keep resolving on demand, or explicitly warm up the container before accepting requests or running tasks:
+
+```ts
+const app = new Cyrene().use(Service);
+try {
+  await app.init();
+  // All reachable singletons are ready for application work.
+} finally {
+  await app.dispose();
+}
+```
+
+`init(): Promise<void>` initializes every singleton in the effective graph, including internal dependencies and lazy targets, reusing pending or completed initialization.
+It does not independently pre-create transients. Strong dependencies of singletons still create transients normally, using the effective lifetime after overrides.
+
+The call immediately locks configuration and validates the complete graph before starting independent branches concurrently. Repeated calls return the same Promise, including failures.
+Failures are reported after all batch branches settle, without automatic rollback or retry. Dispose the container even after failure to release resources.
+`dispose()` waits for an accepted initialization batch. Calls to `init()` after shutdown begins return a rejected Promise.
+Do not await the same container's `init()` inside a factory: it would wait for itself to finish.
+
 ## Declarations and instances
 
 ```text
@@ -129,7 +151,7 @@ app.resolve(Config) === app.resolve(MockConfig); // Same singleton
 
 - The original key, visibility, return type, and sync/async contract remain unchanged.
 - The replacement supplies the factory, dependencies, and lifetime.
-- The first property read or `resolve()` call locks configuration, even if resolution fails.
+- The first property read, `resolve()` call, or `init()` call locks configuration, even if initialization fails.
 
 <details>
 <summary>Override order and reachability</summary>
@@ -172,7 +194,7 @@ Entry properties are read-only. Service instances are not proxied. An async sing
 
 ## Lazy resolution
 
-`lazy()` injects a handle. The target is created when `resolve()` is called:
+During on-demand resolution, `lazy()` injects a handle that creates its target when the handle's `resolve()` is called. `init()` also eagerly initializes singleton targets:
 
 ```ts
 import { lazy, ripple } from 'cyrenex';

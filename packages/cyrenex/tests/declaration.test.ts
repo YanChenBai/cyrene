@@ -130,8 +130,7 @@ const unknownResult: unknown = dynamicApp.resolve('sync');
 const badDynamic: { count: number } = dynamicApp.resolve('sync');
 // @ts-expect-error 没有启动阶段。
 typed.start();
-// @ts-expect-error 没有初始化入口。
-typed.init();
+const initialization: Promise<void> = typed.init();
 // @ts-expect-error 不再接收启动失败选项。
 new Cyrene({ startupFailure: 'dispose' });
 

@@ -75,6 +75,8 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
 
   #disposal: Promise<void> | undefined;
 
+  #initialization: Promise<void> | undefined;
+
   #ripples: Record<string, unknown> = Object.create(null);
 
   #view = new Proxy(this.#ripples, {
@@ -154,6 +156,45 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     this.#require(key);
 
     return this.#resolve(key);
+  }
+
+  /** 主动初始化所有可达 singleton；transient 仍只在实际消费时创建。 */
+  init(): Promise<void> {
+    if (this.#state === 'disposing' || this.#state === 'disposed') {
+      return Promise.reject(new DisposedError('Cyrene is disposing or disposed'));
+    }
+
+    if (this.#initialization) {
+      return this.#initialization;
+    }
+
+    this.#state = 'active';
+    Object.preventExtensions(this.#ripples);
+
+    // 先登记整批任务，再执行构图和用户工厂，关闭时才能等待尚未启动的分支。
+    const initialization = Promise.resolve().then(async () => {
+      const registry = this.#compile();
+      const tasks: Promise<unknown>[] = [];
+
+      for (const [key, registration] of registry) {
+        if (getDefinition(registration.implementation).options.lifetime === 'transient') {
+          continue;
+        }
+
+        tasks.push(Promise.resolve().then(() => this.#resolve(key)));
+      }
+
+      await settle(tasks);
+    });
+
+    this.#initialization = initialization;
+    this.#pending.add(initialization);
+    void initialization.then(
+      () => this.#pending.delete(initialization),
+      () => this.#pending.delete(initialization),
+    );
+
+    return initialization;
   }
 
   inspect(): DependencyGraph {

@@ -9,16 +9,17 @@ description: Use cyrenex to implement or review TypeScript services with typed d
 
 ## 选择 API
 
-| 需求         | 写法                                       | 行为                                         |
-| ------------ | ------------------------------------------ | -------------------------------------------- |
-| 无依赖服务   | `ripple('key', factory)`                   | 保存声明，尚不创建实例                       |
-| 有依赖服务   | `ripple('key', { local: Other }, factory)` | 工厂收到解析后的依赖，输入名不必等于服务 key |
-| 注册公开入口 | `new Cyrene().use(Service)`                | 自动收集内部依赖，仅显式入口出现在 `ripples` |
-| 获取入口     | `app.ripples.service`                      | 同步返回实例，异步返回 Promise               |
-| 获取内部依赖 | `app.resolve(Declaration)`                 | 按声明身份解析，保留实例类型                 |
-| 测试替身     | `app.override(Original, Replacement)`      | 必须在首次解析前完成                         |
-| 延迟访问     | `lazy(() => Target)`                       | 注入句柄，调用 `resolve()` 才初始化目标      |
-| 关闭容器     | `await app.dispose()`                      | 等待已接受的初始化，清理 owned 资源          |
+| 需求         | 写法                                       | 行为                                                             |
+| ------------ | ------------------------------------------ | ---------------------------------------------------------------- |
+| 无依赖服务   | `ripple('key', factory)`                   | 保存声明，尚不创建实例                                           |
+| 有依赖服务   | `ripple('key', { local: Other }, factory)` | 工厂收到解析后的依赖，输入名不必等于服务 key                     |
+| 注册公开入口 | `new Cyrene().use(Service)`                | 自动收集内部依赖，仅显式入口出现在 `ripples`                     |
+| 获取入口     | `app.ripples.service`                      | 同步返回实例，异步返回 Promise                                   |
+| 获取内部依赖 | `app.resolve(Declaration)`                 | 按声明身份解析，保留实例类型                                     |
+| 统一初始化   | `await app.init()`                         | 初始化所有可达 singleton，包括 lazy 目标；不额外预创建 transient |
+| 测试替身     | `app.override(Original, Replacement)`      | 必须在首次解析前完成                                             |
+| 延迟访问     | `lazy(() => Target)`                       | 按需解析时注入句柄；`init()` 会预热 singleton 目标               |
+| 关闭容器     | `await app.dispose()`                      | 等待已接受的初始化，清理 owned 资源                              |
 
 `ripple()` 的最后一个可选参数为 `{ lifetime?: 'singleton' | 'transient', ownership?: 'owned' | 'borrowed' }`。
 默认是 `singleton` 和 `owned`。不要把选项传给 `new Cyrene()`。
@@ -57,7 +58,8 @@ try {
 5. 保留声明的类型推导。给声明标注宽泛的 `Dependency` 类型会丢失 key 字面量信息。
 6. 关闭前先停止并等待业务任务。容器追踪初始化，不追踪服务方法中的请求、流或后台任务。
 
-首次解析尝试就锁定配置，即使解析失败也不能继续注册或覆盖。`inspect()` 只校验和观察依赖图，不执行工厂，也不锁定配置。
+首次解析尝试或调用 `init()` 就锁定配置，即使失败也不能继续注册或覆盖。`inspect()` 只校验和观察依赖图，不执行工厂，也不锁定配置。
+`init()` 返回 `Promise<void>`，重复调用复用同一个 Promise；失败不会自动重试或回滚，仍需关闭容器。工厂不能等待同一容器的 `init()`，否则会等待自身完成。
 
 ## 按场景读取案例
 
@@ -69,7 +71,7 @@ try {
 
 ## 避免生成不存在的 API
 
-- 注册使用 `use(Service, Other)`，没有 `add()`、对象映射式 `use({ service: Service })` 或 `start()` / `init()`。
+- 注册使用 `use(Service, Other)`，没有 `add()`、对象映射式 `use({ service: Service })` 或 `start()`。`init()` 用于显式预热 singleton。
 - 替换使用 `override(Original, Replacement)`，不能按字符串替换；不支持运行中热替换、`remove()` 或响应式代理。
 - 清理使用实例的 `Symbol.dispose` / `Symbol.asyncDispose`。普通 `.dispose()` 方法或 `ripple` 的 `dispose` 选项不会注册清理。
 - `resolve(Declaration)` 不能解析有效图之外的声明；先通过入口或依赖把它加入图。
