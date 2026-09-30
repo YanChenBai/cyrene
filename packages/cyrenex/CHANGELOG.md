@@ -1,5 +1,14 @@
 # cyrenex
 
+## 0.0.1-beta.1
+
+### Patch Changes
+
+- Add eager initialization for singleton services. ([`94eed93`](https://github.com/YanChenBai/cyrene/commit/94eed93add2c270577302ee05b4c8c868640c06a)), by [@YanChenBai](https://github.com/YanChenBai).
+  
+  Singleton services can now initialize eagerly, allowing applications to
+  prepare required services before handling requests.
+
 ## 0.0.1-beta.0
 
 ### Patch Changes

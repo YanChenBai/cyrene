@@ -1,6 +1,6 @@
 {
   "name": "@cyrenex/elysia",
-  "version": "0.0.1-beta.0",
+  "version": "0.0.1-beta.1",
   "description": "Type-safe Cyrene dependency injection for Elysia with lazy resolution and resource disposal",
   "homepage": "https://github.com/YanChenBai/cyrene#readme",
   "bugs": {
