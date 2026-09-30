@@ -1,17 +1,33 @@
-name: Release
+name: CI and Release
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
     branches:
       - main
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  preview:
+    name: Preview Packages
+    needs: ci
+    uses: ./.github/workflows/pkg-pr-new.yml
+    permissions:
+      contents: read
+
   release:
+    name: Release
+    needs: ci
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -36,20 +52,11 @@ jobs:
       - name: Install dependencies
         run: vp install --frozen-lockfile
 
-      - name: Build packages
-        run: vp run -r build
-
-      - name: Check
-        run: vp check
-
-      - name: Test
-        run: vp test run
-
       - name: Create Release PR or publish to npm
         id: changesets
         uses: changesets/action@v2
         with:
-          version-script: vp exec changeset status --output .git/release-status.json && vp run version-packages
+          version-script: vp run version-packages
           publish-script: vp run release
           commit-message: 'chore(release): version packages'
           pr-title: 'release: packages'

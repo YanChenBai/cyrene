@@ -119,7 +119,8 @@ export default defineConfig({
     cache: true,
     tasks: {
       'version-packages': {
-        command: 'changeset version && vp install --lockfile-only',
+        command:
+          'changeset status --output .git/release-status.json && changeset version && vp install --lockfile-only',
         cache: false,
       },
       release: {
