@@ -50,7 +50,7 @@ it('组合后的 Ripples 可以通过消费方导出并生成声明', () => {
     writeFileSync(
       join(directory, 'consumer.ts'),
       `
-import { Cyrene, ripple, lazy } from './library/index.js';
+import { Cyrene, ripple, lazy, verse, verseAsync } from './library/index.js';
 import type { Dependency } from './library/index.js';
 const first = { count: ripple('count', () => 1) };
 export const providers = { ...first, label: ripple('label', () => 'ready') };
@@ -78,6 +78,43 @@ export async function createApp() {
   combined.count();
   return { runtime, container, count, label, enabled, byDeclaration };
 }
+
+// Verse contracts are also checked through emitted package declarations.
+export const configContract = verse<{ prefix: string }, 'agentConfig'>('agentConfig');
+export const databaseContract = verseAsync<{ query(): number }, 'databaseContract'>('databaseContract');
+export const configProvider = ripple(configContract, () => ({ prefix: 'app' }));
+export const databaseProvider = ripple(databaseContract, () => ({ query: () => 42 }));
+const contractConsumer = ripple('contractConsumer', { config: configContract, database: databaseContract }, deps => {
+  const prefix: string = deps.config.prefix;
+  const count: number = deps.database.query();
+  return { prefix, count };
+});
+const contractApp = new Cyrene().use(configProvider, databaseProvider, contractConsumer);
+const contractConfig: { prefix: string } = contractApp.ripples.agentConfig;
+const contractDatabase: Promise<{ query(): number }> = contractApp.resolve(databaseContract);
+const contractResult: Promise<{ prefix: string; count: number }> = contractApp.ripples.contractConsumer;
+// @ts-expect-error Contract result cannot be inferred from an incompatible factory.
+ripple(configContract, () => ({ prefix: 42 }));
+// @ts-expect-error Synchronous contract rejects asynchronous factories.
+ripple(configContract, async () => ({ prefix: 'app' }));
+// @ts-expect-error Synchronous contract rejects asynchronous strong dependencies.
+ripple(configContract, { database: databaseContract }, () => ({ prefix: 'app' }));
+// @ts-expect-error Asynchronous contract still checks the awaited result.
+ripple(databaseContract, async () => ({ query: () => 'wrong' }));
+// @ts-expect-error Even an unknown result contract must reject an async factory.
+ripple(verse<unknown>('unknownSync'), async () => 42);
+// @ts-expect-error A broad object contract must not accept a Promise factory.
+ripple(verse<object>('objectSync'), () => Promise.resolve({}));
+const broadConfig = verse<{ prefix: string }>('broadConfig');
+const broadProvider = ripple(broadConfig, () => ({ prefix: 'app' }));
+const broadConsumer = ripple('broadConsumer', { config: broadConfig }, deps => deps.config.prefix);
+const broadApp = new Cyrene().use(broadProvider, broadConsumer);
+const broadConsumerResult: string = broadApp.ripples.broadConsumer;
+// @ts-expect-error Verse is a reference, not a provider.
+new Cyrene().use(configContract);
+const syncContractWithInputs = ripple(configContract, { count: 1 }, deps => ({ prefix: String(deps.count) }));
+const asyncContractWithInputs = ripple(databaseContract, { value: asyncValueForContract() }, deps => ({ query: () => deps.value }));
+function asyncValueForContract() { return ripple('asyncContractInput', async () => 42); }
 
 // 内部节点不暴露为属性，但声明解析保留精确类型。
 const internal = ripple('internal', () => ({ value: 42 }));

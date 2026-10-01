@@ -18,8 +18,10 @@ import type {
   InferInput,
   NodeState,
   EntryDeclarations,
+  Verse,
 } from './types.ts';
 import { inputEntries } from './utils.ts';
+import { isVerse, isVerseAsync } from './verse.ts';
 
 interface Resolution {
   key: string;
@@ -28,7 +30,9 @@ interface Resolution {
   value?: unknown;
   error?: unknown;
   executing: boolean;
+  synchronous: boolean;
   resultDeferred?: boolean;
+  asyncValue?: Promise<unknown>;
   /** 仅保存尚未完成的初始化等待边，不维护第二份资源依赖图。 */
   waiting: Set<Resolution>;
 }
@@ -140,11 +144,11 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     return this;
   }
 
-  resolve<D extends Dependency>(target: D): Resolved<D>;
+  resolve<D extends Dependency | Verse>(target: D): Resolved<D>;
   resolve<K extends string>(key: K): K extends keyof TRipples ? Resolved<TRipples[K]> : unknown;
 
   /** 三种入口遵循同一 lifetime；singleton 复用结果，transient 每次重新创建。 */
-  resolve(target: string | Dependency): unknown {
+  resolve(target: string | Dependency | Verse): unknown {
     if (this.#state === 'disposing' || this.#state === 'disposed') {
       throw new DisposedError('Cyrene is disposing or disposed');
     }
@@ -154,6 +158,29 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     this.#compile();
     const key = this.#resolveKey(target);
     this.#require(key);
+
+    if (isVerse(target)) {
+      if (isVerseAsync(target)) {
+        const record = this.#resolveRecord(key);
+
+        if (!record.asyncValue) {
+          try {
+            record.asyncValue = Promise.resolve(this.#result(record));
+          } catch (error) {
+            record.asyncValue = Promise.reject(error);
+          }
+
+          void record.asyncValue.catch(() => {});
+        }
+
+        return record.asyncValue;
+      }
+
+      const value = this.#resolve(key);
+      this.#assertSynchronous(value, key);
+
+      return value;
+    }
 
     return this.#resolve(key);
   }
@@ -251,9 +278,9 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     }
   }
 
-  #resolveKey(target: string | Dependency): string {
-    if (typeof target === 'string') {
-      return target;
+  #resolveKey(target: string | Dependency | Verse): string {
+    if (typeof target === 'string' || isVerse(target)) {
+      return typeof target === 'string' ? target : target.key;
     }
 
     assertDependency(target);
@@ -297,16 +324,16 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
 
   #newRecord(key: string, owner?: Resolution): Resolution {
     this.#assertCreationPath(key, owner);
+    const definition = getDefinition(this.#registry!.get(key)!.implementation);
 
     const record: Resolution = {
       key,
       parent: owner,
       state: 'initializing',
       executing: true,
+      synchronous: definition.synchronous,
       waiting: new Set(),
     };
-
-    const definition = getDefinition(this.#registry!.get(key)!.implementation);
 
     if (definition.options.lifetime !== 'transient') {
       this.#cache.set(key, record);
@@ -351,6 +378,10 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     }
 
     if (isPromise(value)) {
+      if (record.synchronous) {
+        this.#assertSynchronous(value, record.key);
+      }
+
       if (owner) {
         const release = () => {
           owner.waiting.delete(record);
@@ -377,11 +408,26 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     this.#executing.add(record.key);
 
     try {
-      const value = this.#initialize(record);
+      const registration = this.#registry!.get(record.key)!;
+      let value = this.#initialize(record);
+
+      if (registration.async) {
+        value = Promise.resolve(value);
+      }
 
       if (isPromise(value)) {
         const promise = Promise.resolve(value)
-          .then(result => this.#complete(record, result))
+          .then(result => {
+            const completed = this.#complete(record, result);
+
+            if (record.synchronous) {
+              throw new InvalidDependencyError(
+                `Synchronous Verse requires a synchronous implementation: ${record.key}`,
+              );
+            }
+
+            return completed;
+          })
           .catch(cause => {
             throw this.#fail(record, cause);
           });
@@ -403,7 +449,13 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
         record.value = result;
       }
     } catch (cause) {
-      this.#fail(record, cause);
+      const error = this.#fail(record, cause);
+
+      if (this.#registry!.get(record.key)!.async) {
+        const rejected = Promise.reject(error);
+        record.value = rejected;
+        void rejected.catch(() => {});
+      }
     } finally {
       record.executing = false;
       this.#executing.delete(record.key);
@@ -465,6 +517,10 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
         const value =
           edge.kind === 'lazy' ? this.#lazyHandle(edge.to, record) : this.#resolve(edge.to, record);
 
+        if (registration.synchronousInputs.has(key)) {
+          this.#assertSynchronous(value, edge.to);
+        }
+
         const assign = (value: unknown) => {
           Object.defineProperty(resolved, key, { value, enumerable: true });
         };
@@ -494,6 +550,16 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     }
 
     return definition.invoke(resolved);
+  }
+
+  #assertSynchronous(value: unknown, key: string): void {
+    if (isPromise(value)) {
+      // 已启动的异步分支仍由正常初始化流程追踪和清理。
+      void Promise.resolve(value).catch(() => {});
+      throw new InvalidDependencyError(
+        `Synchronous Verse requires a synchronous implementation: ${key}`,
+      );
+    }
   }
 
   #lazyHandle(key: string, owner: Resolution) {

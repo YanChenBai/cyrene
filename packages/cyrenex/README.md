@@ -139,6 +139,68 @@ const app = new Cyrene().use(logger('auditLogger', 'audit'), logger('requestLogg
 
 </details>
 
+## 按 key 声明依赖契约
+
+`verse<T>(key)` 声明同步契约，`verseAsync<T>(key)` 声明异步契约。消费者只需要契约，不需要提供方的 Ripple 对象：
+
+```ts
+import { Cyrene, ripple, verse, verseAsync } from 'cyrenex';
+
+interface AgentOptions {
+  prefix: string;
+}
+
+const AgentConfig = verse<AgentOptions>('agentConfig');
+const Database = verseAsync<{ query(): string[] }>('database');
+const Agent = ripple(
+  'agent',
+  { config: AgentConfig, database: Database },
+  ({ config, database }) => ({
+    list: () => database.query().map(name => `${config.prefix}: ${name}`),
+  }),
+);
+
+function agentConfigPlugin(options: AgentOptions) {
+  return ripple(AgentConfig, () => options);
+}
+
+const DatabasePlugin = ripple(Database, async () => ({ query: () => ['Alice'] }));
+const app = new Cyrene().use(agentConfigPlugin({ prefix: 'app' }), DatabasePlugin, Agent);
+
+const agent = await app.ripples.agent;
+agent.list(); // ['app: Alice']
+await app.dispose();
+```
+
+提供方也可以继续写 `ripple('agentConfig', () => options)`。按 key 关联，不要求消费者和提供方使用同一个 verse 对象；`ripple(AgentConfig, factory)` 则额外校验工厂返回类型。
+
+| 契约                 | 实现要求             | 解析结果     |
+| -------------------- | -------------------- | ------------ |
+| `verse<T>(key)`      | 工厂和全部强依赖同步 | `T`          |
+| `verseAsync<T>(key)` | 同步或异步实现       | `Promise<T>` |
+
+工厂收到已解析的依赖实例。强依赖包含 `verseAsync` 时，消费者也返回 Promise；同步实现通过异步契约访问时，其字符串或 Ripple 入口仍保持原来的同步行为。
+
+- 实现必须已经通过 `use()` 或其他 Ripple 的依赖进入有效图；verse 本身不能注册，也不会自动创建实现。
+- 注册顺序不影响查找。缺失实现、重复 key 和强依赖环在构图时报告；`override()` 后仍按原 key 查找有效实现。
+- 同步契约的异步冲突在构图时检查；普通函数动态返回 Promise 的情况在解析时拒绝，不会把 Promise 注入同步消费者。
+- `app.resolve(AgentConfig)` / `app.resolve(Database)` 保留契约类型。字符串提供方的结果类型无法与独立契约静态核对，`T` 由调用方保证。
+
+<details>
+<summary>保留提供方的 key 字面量类型</summary>
+
+TypeScript 显式指定 `T` 后不会继续推导带默认值的 key 类型参数。需要让 `ripple(verse, factory)` 累积精确的公开属性名时，同时指定 key 类型：
+
+```ts
+const AgentConfig = verse<AgentOptions, 'agentConfig'>('agentConfig');
+const app = new Cyrene().use(ripple(AgentConfig, () => ({ prefix: 'app' })));
+app.ripples.agentConfig.prefix;
+```
+
+只写 `verse<AgentOptions>('agentConfig')` 时，key 类型为 `string`；可使用 `resolve(AgentConfig)` 获取精确实例类型，或用字符串定义提供方以保留 key 推导。
+
+</details>
+
 ## 首次解析前替换
 
 通过原声明指定替换目标, 公开入口与内部依赖使用同一规则:
