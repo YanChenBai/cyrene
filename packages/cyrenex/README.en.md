@@ -137,6 +137,68 @@ const app = new Cyrene().use(logger('auditLogger', 'audit'), logger('requestLogg
 
 </details>
 
+## Dependency contracts by key
+
+`verse<T>(key)` declares a synchronous contract; `verseAsync<T>(key)` declares an asynchronous contract. Consumers can depend on contracts without importing provider Ripple objects:
+
+```ts
+import { Cyrene, ripple, verse, verseAsync } from 'cyrenex';
+
+interface AgentOptions {
+  prefix: string;
+}
+
+const AgentConfig = verse<AgentOptions>('agentConfig');
+const Database = verseAsync<{ query(): string[] }>('database');
+const Agent = ripple(
+  'agent',
+  { config: AgentConfig, database: Database },
+  ({ config, database }) => ({
+    list: () => database.query().map(name => `${config.prefix}: ${name}`),
+  }),
+);
+
+function agentConfigPlugin(options: AgentOptions) {
+  return ripple(AgentConfig, () => options);
+}
+
+const DatabasePlugin = ripple(Database, async () => ({ query: () => ['Alice'] }));
+const app = new Cyrene().use(agentConfigPlugin({ prefix: 'app' }), DatabasePlugin, Agent);
+
+const agent = await app.ripples.agent;
+agent.list(); // ['app: Alice']
+await app.dispose();
+```
+
+Providers can still use `ripple('agentConfig', () => options)`. Matching uses the key, so consumers and providers need not share the same verse object. `ripple(AgentConfig, factory)` also checks the factory's result type.
+
+| Contract             | Implementation requirements                     | Resolution result |
+| -------------------- | ----------------------------------------------- | ----------------- |
+| `verse<T>(key)`      | Synchronous factory and all strong dependencies | `T`               |
+| `verseAsync<T>(key)` | Synchronous or asynchronous implementation      | `Promise<T>`      |
+
+Factories receive resolved instances. A strong `verseAsync` input makes its consumer asynchronous. Accessing a synchronous implementation through an asynchronous contract preserves the provider's original string and Ripple entry behavior.
+
+- Implementations must enter the effective graph through `use()` or another Ripple dependency. A verse cannot be registered and does not supply an implementation.
+- Registration order does not affect lookup. Compilation rejects missing implementations, duplicate keys, and strong cycles. Overrides are looked up using the original key.
+- Compilation detects known asynchronous implementations for synchronous contracts. Ordinary functions that dynamically return promises are rejected during resolution before invoking synchronous consumers.
+- `app.resolve(AgentConfig)` and `app.resolve(Database)` preserve contract types. Independently defined string providers cannot be statically checked against a contract's `T`; the caller must ensure compatibility.
+
+<details>
+<summary>Preserving a provider's literal key type</summary>
+
+When `T` is explicit, TypeScript does not infer the remaining defaulted key type parameter. Specify both parameters to accumulate exact public property names with `ripple(verse, factory)`:
+
+```ts
+const AgentConfig = verse<AgentOptions, 'agentConfig'>('agentConfig');
+const app = new Cyrene().use(ripple(AgentConfig, () => ({ prefix: 'app' })));
+app.ripples.agentConfig.prefix;
+```
+
+With `verse<AgentOptions>('agentConfig')`, the key type is `string`. Use `resolve(AgentConfig)` for the precise instance type, or define the provider with a string key to preserve key inference.
+
+</details>
+
 ## Overrides before resolution
 
 Use the original declaration to target either a public entry or an internal dependency:

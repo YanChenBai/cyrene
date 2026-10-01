@@ -24,6 +24,16 @@ description: Use cyrenex to implement or review TypeScript services with typed d
 `ripple()` 的最后一个可选参数为 `{ lifetime?: 'singleton' | 'transient', ownership?: 'owned' | 'borrowed' }`。
 默认是 `singleton` 和 `owned`。不要把选项传给 `new Cyrene()`。
 
+## 按 key 解耦依赖
+
+消费者用 `verse<T>('key')` 声明同步契约，或 `verseAsync<T>('key')` 声明异步契约，再将其放入 ripple 的 deps。工厂收到已解析的 `T`；强依赖的异步契约会传播到消费者。
+
+提供方用 `ripple('key', factory)`，或 `ripple(Contract, factory)` / `ripple(Contract, deps, factory)` 共用契约并校验返回值。实现必须已经通过 `use()` 或其他 Ripple 依赖进入有效图；verse 本身不能传给 `use()`。
+
+按 key 关联，不要求同一个 verse 对象。`resolve(Contract)` 保留类型；同步契约拒绝异步实现，异步契约允许同步实现并统一返回 Promise。`override()` 仍以原 Ripple 声明定位。
+
+显式指定 `T` 时 key 类型默认是 `string`。需要 `ripple(Contract, factory)` 保留公开属性的字面量 key 时，使用 `verse<T, 'key'>('key')` / `verseAsync<T, 'key'>('key')`；否则用 `resolve(Contract)` 或字符串提供方。
+
 ## 完整案例：声明依赖，在入口使用
 
 下面的 TypeScript ESM 代码只依赖 `cyrenex`，不需要外部服务：
@@ -51,7 +61,7 @@ try {
 
 ## 编写服务时遵循的规则
 
-1. 服务间引用同一个 Ripple 声明对象；不要在每次请求中重新创建同 key 的声明。
+1. 直接依赖使用同一个 Ripple 声明对象；按 key 解耦时使用 `verse<T>(key)` / `verseAsync<T>(key)`。不要在每次请求中重新创建同 key 的实现。
 2. 将依赖放进 `deps` 或 `lazy`。工厂接收依赖实例，不接收容器；不要在工厂中等待同一容器的公共解析或关闭。
 3. 在应用组合阶段完成所有 `use()` 和 `override()`，然后才解析、执行任务或接收请求。
 4. 链式调用 `use()`，或接住返回值以累积入口类型。独立调用 `app.use(Service)` 不会改变原变量的泛型；动态注册后可用 `resolve(Service)` 保留类型。

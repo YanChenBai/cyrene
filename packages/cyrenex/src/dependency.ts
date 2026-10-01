@@ -7,6 +7,8 @@ export interface RippleDefinition {
   readonly inputs: Readonly<Record<PropertyKey, unknown>>;
   readonly invoke: (inputs: Record<PropertyKey, unknown>) => unknown;
   readonly options: Readonly<RippleOptions>;
+  readonly async: boolean;
+  readonly synchronous: boolean;
 }
 // 元数据不暴露在声明属性上，替换只改变运行时绑定，绝不改写原始声明。
 const definitions = new WeakMap<object, RippleDefinition>();

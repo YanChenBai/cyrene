@@ -1,13 +1,16 @@
 import { assertDependency, getDefinition, isDependency } from './dependency.ts';
 import { CircularDependencyError, InvalidDependencyError } from './errors.ts';
 import { getLazyTarget, isLazy } from './lazy.ts';
-import type { Dependency, GraphEdge } from './types.ts';
+import type { Dependency, GraphEdge, Verse } from './types.ts';
 import { inputEntries } from './utils.ts';
+import { isVerse, isVerseAsync } from './verse.ts';
 
 export interface CompiledRegistration {
   original: Dependency;
   implementation: Dependency;
   dependencies: Map<PropertyKey, GraphEdge>;
+  synchronousInputs: Set<PropertyKey>;
+  async: boolean;
 }
 
 export type Registry = Map<string, CompiledRegistration>;
@@ -20,6 +23,9 @@ export function compileRegistry(
   const registry: Registry = new Map();
   const identities = new Map<Dependency, string>();
   const reachable = new Set<Dependency>();
+
+  const references: { registration: CompiledRegistration; input: PropertyKey; target: Verse }[] =
+    [];
 
   const visit = (original: Dependency): string => {
     assertDependency(original);
@@ -40,6 +46,8 @@ export function compileRegistry(
       original,
       implementation,
       dependencies: new Map(),
+      synchronousInputs: new Set(),
+      async: getDefinition(implementation).async,
     };
 
     registry.set(key, registration);
@@ -50,6 +58,11 @@ export function compileRegistry(
     for (const [input, value] of inputEntries(getDefinition(implementation).inputs)) {
       const deferred = isLazy(value);
       const target = deferred ? getLazyTarget(value) : value;
+
+      if (isVerse(target)) {
+        references.push({ registration, input, target });
+        continue;
+      }
 
       if (isDependency(target)) {
         registration.dependencies.set(input, {
@@ -68,6 +81,26 @@ export function compileRegistry(
     visit(root);
   }
 
+  // 等完整闭包收集结束后再按 key 关联，避免入口顺序影响查找。
+  for (const { registration, input, target } of references) {
+    if (!registry.has(target.key)) {
+      throw new InvalidDependencyError(`Missing Verse implementation: ${target.key}`);
+    }
+
+    registration.dependencies.set(input, {
+      from: registration.original.key,
+      to: target.key,
+      input,
+      kind: 'dependency',
+    });
+
+    if (isVerseAsync(target)) {
+      registration.async = true;
+    } else {
+      registration.synchronousInputs.add(input);
+    }
+  }
+
   for (const target of overrides.keys()) {
     if (!reachable.has(target)) {
       throw new InvalidDependencyError(`Override target is not reachable: ${target.key}`);
@@ -75,8 +108,50 @@ export function compileRegistry(
   }
 
   validateRegistry(registry);
+  validateContracts(registry);
 
   return { registry, identities };
+}
+
+/** 在强依赖环校验后传播已知异步性，拒绝同步契约绑定异步实现。 */
+function validateContracts(registry: Registry): void {
+  const visited = new Set<string>();
+
+  const visit = (key: string): boolean => {
+    const registration = registry.get(key)!;
+
+    if (visited.has(key)) {
+      return registration.async;
+    }
+
+    for (const edge of registration.dependencies.values()) {
+      if (edge.kind === 'dependency') {
+        const async = visit(edge.to);
+
+        if (async && registration.synchronousInputs.has(edge.input)) {
+          throw new InvalidDependencyError(
+            `Synchronous Verse requires a synchronous implementation: ${edge.to}`,
+          );
+        }
+
+        registration.async ||= async;
+      }
+    }
+
+    if (registration.async && getDefinition(registration.implementation).synchronous) {
+      throw new InvalidDependencyError(
+        `Synchronous Verse requires a synchronous implementation: ${key}`,
+      );
+    }
+
+    visited.add(key);
+
+    return registration.async;
+  };
+
+  for (const key of registry.keys()) {
+    visit(key);
+  }
 }
 
 /** 一个声明不能同时代表两个槽位，替身也遵循这个约束。 */

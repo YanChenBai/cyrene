@@ -1,4 +1,4 @@
-import type { RIPPLE_BRAND, LAZY_BRAND } from './symbols.ts';
+import type { RIPPLE_BRAND, LAZY_BRAND, VERSE_BRAND } from './symbols.ts';
 
 export type Lifetime = 'singleton' | 'transient';
 
@@ -29,6 +29,11 @@ export interface LazyRef<T = unknown, Async extends boolean = boolean> {
   readonly [LAZY_BRAND]: { readonly result?: T; readonly async?: Async };
 }
 
+export interface Verse<T = unknown, Async extends boolean = boolean, Key extends string = string> {
+  readonly key: Key;
+  readonly [VERSE_BRAND]: { readonly result?: T; readonly async?: Async };
+}
+
 export interface Lazy<T, Async extends boolean = boolean> {
   /** 按目标 lifetime 解析；transient 每次调用创建新实例。 */
   resolve(): AsyncResult<T, Async>;
@@ -39,8 +44,11 @@ export type EntryDeclarations<T extends readonly Dependency[]> = {
   [D in T[number] as D['key']]: D;
 };
 
-export type InferInput<T> =
-  T extends Dependency<infer R> ? R : T extends LazyRef<infer R, infer A> ? Lazy<R, A> : T;
+export type InferInput<T> = T extends Dependency<infer R> | Verse<infer R>
+  ? R
+  : T extends LazyRef<infer R, infer A>
+    ? Lazy<R, A>
+    : T;
 
 export type ResolveInputs<T> = {
   [K in keyof T]: InferInput<T[K]>;
@@ -48,13 +56,18 @@ export type ResolveInputs<T> = {
 
 export type AsyncResult<T, Async extends boolean> = Async extends true ? Promise<T> : T;
 
-export type DependencyAsync<D> = D extends Dependency<unknown, unknown, infer A> ? A : false;
-export type Resolved<D> =
-  D extends Dependency<infer T, unknown, infer A> ? AsyncResult<T, A> : unknown;
+export type DependencyAsync<D> = D extends
+  | Dependency<unknown, unknown, infer A>
+  | Verse<unknown, infer A>
+  ? A
+  : false;
+export type Resolved<D> = D extends Dependency<infer T, unknown, infer A> | Verse<infer T, infer A>
+  ? AsyncResult<T, A>
+  : unknown;
 
 type AsyncMode<T> =
   true extends DependencyAsync<T>
-    ? [T] extends [Dependency<unknown, unknown, true>]
+    ? [T] extends [Dependency<unknown, unknown, true> | Verse<unknown, true>]
       ? 'async'
       : 'maybe'
     : never;
