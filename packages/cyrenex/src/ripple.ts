@@ -85,6 +85,7 @@ function ripple(
   return declaration;
 }
 
+/** 保留无依赖工厂的调用形状，并将异步契约的返回值和同步错误统一为 Promise。 */
 function createInvocation(factory: Function, withoutInputs: boolean, contract?: Verse) {
   let invoke = (values: Record<PropertyKey, unknown>): unknown =>
     Reflect.apply(factory, undefined, [values]);

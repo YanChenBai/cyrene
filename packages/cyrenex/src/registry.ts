@@ -113,6 +113,7 @@ export function compileRegistry(
   return { registry, identities };
 }
 
+/** 在强依赖环校验后传播已知异步性，拒绝同步契约绑定异步实现。 */
 function validateContracts(registry: Registry): void {
   const visited = new Set<string>();
 

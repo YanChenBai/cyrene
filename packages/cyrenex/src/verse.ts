@@ -15,6 +15,7 @@ export function verseAsync<T, const K extends string = string>(key: K): Verse<T,
   return createVerse(key, true);
 }
 
+/** 校验 key 并登记不可变契约，运行时身份与异步标记不依赖公开字段。 */
 function createVerse<T, A extends boolean, K extends string>(key: K, async: A): Verse<T, A, K> {
   if (typeof key !== 'string' || key.length === 0) {
     throw new InvalidDependencyError('Verse key must be a non-empty string');
@@ -26,10 +27,12 @@ function createVerse<T, A extends boolean, K extends string>(key: K, async: A): 
   return reference;
 }
 
+/** 仅识别由当前库创建的契约，拒绝同形对象和复制的品牌字段。 */
 export function isVerse(value: unknown): value is Verse {
   return isObject(value) && contracts.has(value);
 }
 
+/** 读取契约登记的异步标记，用于构图校验和解析结果归一化。 */
 export function isVerseAsync(reference: Verse): boolean {
   return contracts.get(reference) === true;
 }

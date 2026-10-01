@@ -278,6 +278,7 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     }
   }
 
+  /** 字符串和 verse 按 key 定位；Ripple 按有效图中登记的声明身份定位。 */
   #resolveKey(target: string | Dependency | Verse): string {
     if (typeof target === 'string' || isVerse(target)) {
       return typeof target === 'string' ? target : target.key;
@@ -322,6 +323,7 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     return record;
   }
 
+  /** 创建初始化记录并保存同步契约；仅 singleton 在执行工厂前进入缓存。 */
   #newRecord(key: string, owner?: Resolution): Resolution {
     this.#assertCreationPath(key, owner);
     const definition = getDefinition(this.#registry!.get(key)!.implementation);
@@ -368,6 +370,7 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     }
   }
 
+  /** 交付值或缓存的 Promise，执行同步契约检查并维护消费者的等待边。 */
   #result(record: Resolution, owner?: Resolution): unknown {
     // lazy 启动的消费者可以先等待执行中的父工厂，待其交付结果后再继续。
     let value = record.value;
@@ -403,6 +406,7 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     return value;
   }
 
+  /** 执行初始化并追踪异步分支；契约违例仍登记已创建资源，再记录失败。 */
   #create(record: Resolution): void {
     this.#states.set(record.key, 'initializing');
     this.#executing.add(record.key);
@@ -498,6 +502,7 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     return [...source.waiting].some(child => this.#reaches(child, target, visited));
   }
 
+  /** 解析全部强依赖并注入 lazy 句柄；等待异步分支结束后调用工厂。 */
   #initialize(record: Resolution): unknown {
     const registration = this.#registry!.get(record.key)!;
     const definition = getDefinition(registration.implementation);
@@ -552,6 +557,7 @@ export class Cyrene<TRipples extends DependencyEntries = {}> {
     return definition.invoke(resolved);
   }
 
+  /** 拒绝同步边界中的 Promise，同时观察拒绝，已启动分支仍由容器追踪。 */
   #assertSynchronous(value: unknown, key: string): void {
     if (isPromise(value)) {
       // 已启动的异步分支仍由正常初始化流程追踪和清理。
