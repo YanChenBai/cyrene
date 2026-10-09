@@ -175,7 +175,7 @@ await app.dispose();
 
 - 契约按 key 查找实现，不要求是同一个 verse 对象。提供方可以写 `ripple('agentConfig', factory)`，也可以写 `ripple(AgentConfig, factory)`，后者会额外校验返回类型。
 - 实现必须通过 `use()` 或其他 Ripple 的依赖进入注册表。由于允许动态注册，缺失的实现要到解析时才会报错。
-- 实现必须同步返回。解析结果是 Promise 时抛出 `InvalidDependencyError`。需要异步初始化的服务，直接依赖它的 Ripple 声明，或让实现同步返回一个内部处理异步操作的对象。
+- 实现必须同步返回。`T` 不能包含 Promise，`verse<Promise<X>>` 会在类型检查时报错；运行时解析结果是 Promise 时抛出 `InvalidDependencyError`。需要异步初始化的服务，直接依赖它的 Ripple 声明，或让实现同步返回一个内部处理异步操作的对象。
 - 显式指定 `T` 后 key 类型默认为 `string`。需要累积精确的公开属性名时，写成 `verse<AgentOptions, 'agentConfig'>('agentConfig')`。
 
 ## 替换实现

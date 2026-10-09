@@ -175,7 +175,7 @@ await app.dispose();
 
 - Contracts find implementations by key, so they do not need to be the same verse object. Providers can use `ripple('agentConfig', factory)` or `ripple(AgentConfig, factory)`; the latter also checks the return type.
 - Implementations must enter the registry through `use()` or as another Ripple's dependency. Because registration is dynamic, a missing implementation is reported at resolution time.
-- Implementations must return synchronously; a Promise result throws `InvalidDependencyError`. For services that need async initialization, depend on their Ripple directly, or have the implementation synchronously return an object that handles the async work internally.
+- Implementations must return synchronously. `T` cannot contain a Promise, so `verse<Promise<X>>` is a type error; a Promise result at runtime throws `InvalidDependencyError`. For services that need async initialization, depend on their Ripple directly, or have the implementation synchronously return an object that handles the async work internally.
 - After specifying `T` explicitly, the key type defaults to `string`. To accumulate an exact entry name, write `verse<AgentOptions, 'agentConfig'>('agentConfig')`.
 
 ## Overrides

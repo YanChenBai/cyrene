@@ -109,5 +109,8 @@ describe('resolution', () => {
     const broken = new Cyrene().use(Bad);
     expect(() => broken.resolve(BadPort)).toThrow(InvalidDependencyError);
     expect(() => new Cyrene().resolve(Port)).toThrow('Unknown registration key: port');
+
+    // @ts-expect-error Verse 只能是同步契约
+    verse<number | Promise<number>>('async');
   });
 });

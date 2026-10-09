@@ -87,8 +87,11 @@ function ripple(keyOrContract: string | Verse, ...args: [unknown, unknown?, unkn
 
 export { ripple };
 
-/** 声明按 key 查找实现的契约：实现必须同步返回。 */
-export function verse<T, const K extends string = string>(key: K): Verse<T, K> {
+/** 声明按 key 查找实现的契约：实现必须同步返回，T 不能包含 Promise。 */
+export function verse<T, const K extends string = string>(
+  key: K &
+    ([Extract<T, PromiseLike<unknown>>] extends [never] ? unknown : 'Verse<T> cannot be a Promise'),
+): Verse<T, K> {
   assertKey(key);
   const reference = Object.freeze({ key });
   verses.add(reference);

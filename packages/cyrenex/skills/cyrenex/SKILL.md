@@ -36,7 +36,7 @@ singleton 不能依赖 scoped，无论是直接、经由 transient 还是通过 
 
 消费者用 `verse<T>('key')` 声明同步契约，再放进 ripple 的 deps。提供方写 `ripple('key', factory)`，或写 `ripple(Contract, factory)` / `ripple(Contract, deps, factory)` 来校验返回类型。
 
-契约按 key 查找实现，实现必须通过 `use()` 或其他 Ripple 的依赖注册进来；缺失的实现在解析时才报错。实现必须同步返回，解析结果是 Promise 时抛错；需要异步初始化的服务应直接依赖它的 Ripple 声明。显式指定 `T` 时 key 类型默认是 `string`，需要保留字面量 key 时写 `verse<T, 'key'>('key')`。
+契约按 key 查找实现，实现必须通过 `use()` 或其他 Ripple 的依赖注册进来；缺失的实现在解析时才报错。实现必须同步返回，`T` 不能包含 Promise（类型检查时报错），运行时解析结果是 Promise 也会抛错；需要异步初始化的服务应直接依赖它的 Ripple 声明。显式指定 `T` 时 key 类型默认是 `string`，需要保留字面量 key 时写 `verse<T, 'key'>('key')`。
 
 ## 完整案例
 
