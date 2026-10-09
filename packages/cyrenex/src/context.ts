@@ -1,4 +1,4 @@
-import { isVerse, isVerseAsync } from './declarations.ts';
+import { isVerse } from './declarations.ts';
 import {
   CircularDependencyError,
   CyreneError,
@@ -347,23 +347,11 @@ function isStale(instance: Instance): boolean {
   return instance.generation !== instance.node.generation;
 }
 
-/** 按 Verse 契约转换结果：异步契约统一为 Promise，同步契约拒绝 Promise。 */
+/** Verse 是同步契约：实现解析为 Promise 时拒绝。 */
 function contract(target: Target, resolve: () => unknown): unknown {
-  if (!isVerse(target)) {
-    return resolve();
-  }
-
-  if (isVerseAsync(target)) {
-    try {
-      return Promise.resolve(resolve());
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
   const value = resolve();
 
-  if (isPromise(value)) {
+  if (isVerse(target) && isPromise(value)) {
     value.then(noop, noop);
     throw new InvalidDependencyError(
       `Synchronous Verse requires a synchronous implementation: ${target.key}`,

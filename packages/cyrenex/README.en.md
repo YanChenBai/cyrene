@@ -150,44 +150,32 @@ await app.dispose(); // closes live scopes first, then releases root resources
 
 ## Dependency contracts by key
 
-`verse<T>(key)` declares a synchronous contract and `verseAsync<T>(key)` an asynchronous one. Consumers only need the contract, not the provider's Ripple:
+`verse<T>(key)` declares a synchronous contract whose implementation is found by key. Consumers only need the contract, not the provider's Ripple:
 
 ```ts
-import { Cyrene, ripple, verse, verseAsync } from 'cyrenex';
+import { Cyrene, ripple, verse } from 'cyrenex';
 
 interface AgentOptions {
   prefix: string;
 }
 
 const AgentConfig = verse<AgentOptions>('agentConfig');
-const Database = verseAsync<{ query(): string[] }>('database');
-const Agent = ripple(
-  'agent',
-  { config: AgentConfig, database: Database },
-  ({ config, database }) => ({
-    list: () => database.query().map(name => `${config.prefix}: ${name}`),
-  }),
-);
+const Agent = ripple('agent', { config: AgentConfig }, ({ config }) => ({
+  label: (name: string) => `${config.prefix}: ${name}`,
+}));
 
 const app = new Cyrene().use(
   ripple(AgentConfig, () => ({ prefix: 'app' })),
-  ripple(Database, async () => ({ query: () => ['Alice'] })),
   Agent,
 );
 
-const agent = await app.ripples.agent;
-agent.list(); // ['app: Alice']
+app.ripples.agent.label('Alice'); // 'app: Alice'
 await app.dispose();
 ```
 
-| Contract             | Implementation requirement     | Result       |
-| -------------------- | ------------------------------ | ------------ |
-| `verse<T>(key)`      | The result cannot be a Promise | `T`          |
-| `verseAsync<T>(key)` | Sync or async                  | `Promise<T>` |
-
 - Contracts find implementations by key, so they do not need to be the same verse object. Providers can use `ripple('agentConfig', factory)` or `ripple(AgentConfig, factory)`; the latter also checks the return type.
 - Implementations must enter the registry through `use()` or as another Ripple's dependency. Because registration is dynamic, a missing implementation is reported at resolution time.
-- When a synchronous contract's implementation returns a Promise, resolution throws `InvalidDependencyError`.
+- Implementations must return synchronously; a Promise result throws `InvalidDependencyError`. For services that need async initialization, depend on their Ripple directly, or have the implementation synchronously return an object that handles the async work internally.
 - After specifying `T` explicitly, the key type defaults to `string`. To accumulate an exact entry name, write `verse<AgentOptions, 'agentConfig'>('agentConfig')`.
 
 ## Overrides

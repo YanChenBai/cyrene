@@ -6,7 +6,7 @@
 
 | 文件              | 职责                                                                    |
 | ----------------- | ----------------------------------------------------------------------- |
-| `declarations.ts` | `ripple` / `verse` / `verseAsync` / `lazy`，配方保存在内部 WeakMap      |
+| `declarations.ts` | `ripple` / `verse` / `lazy`，配方保存在内部 WeakMap                     |
 | `registry.ts`     | key → 节点，公开入口，override 时计算受影响的依赖者                     |
 | `context.ts`      | 解析、缓存、作用域、资源登记与释放；根容器和作用域都是一个 Context      |
 | `cyrene.ts`       | 公共类：`Scope`（`ripples` / `resolve` / `dispose`）和继承它的 `Cyrene` |
@@ -45,7 +45,7 @@ Context(root) ── singleton 缓存、资源
 2. 节点是 scoped 且 `captive` 为真（当前处于 singleton 的依赖链中），抛出 `InvalidDependencyError`。
 3. 选择归属：singleton 归根上下文，其他归当前上下文。
 4. 命中缓存时直接返回缓存的值或 Promise。如果命中的实例还在同步构造中，抛出循环错误；这种情况只会由 lazy 的同步重入触发。
-5. 未命中时，非 transient 先写入缓存，再解析输入：强依赖递归解析（Verse 经过契约转换），lazy 注入句柄，普通值原样传递。存在异步依赖时，等全部完成后再调用工厂。
+5. 未命中时，非 transient 先写入缓存，再解析输入：强依赖递归解析（Verse 的结果不能是 Promise），lazy 注入句柄，普通值原样传递。存在异步依赖时，等全部完成后再调用工厂。
 6. 同步结果直接完成。异步结果把 Promise 存为实例值，并登记到上下文的待完成集合。
 7. 失败时移出缓存（不缓存失败），并包装成 `ResolutionError(path, cause)`。已经是 `CyreneError` 的错误原样上抛，所以 `path` 是从入口到最深失败点的完整链路。
 

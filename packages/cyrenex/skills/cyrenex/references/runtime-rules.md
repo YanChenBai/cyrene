@@ -16,7 +16,7 @@
 - 强依赖环在解析时抛出 `CircularDependencyError`。lazy 不是强依赖，可以打破环；但在工厂中同步调用指向自身的 lazy 句柄也会抛出循环错误。
 - 不检测跨 `await` 的等待环。双向依赖至少一侧用 lazy，并且在初始化完成后再访问。
 - 工厂失败时抛出 `ResolutionError`，`path` 是从入口到失败服务的完整链路，`cause` 是原错误。失败不缓存，下次解析会重新执行工厂。
-- 未知 key、缺失的 Verse 实现、同步契约收到 Promise，都抛出 `InvalidDependencyError`。
+- 未知 key、缺失的 Verse 实现、Verse 的实现解析为 Promise，都抛出 `InvalidDependencyError`。
 
 ## 生命周期与作用域
 

@@ -150,44 +150,32 @@ await app.dispose(); // 先关闭仍存活的作用域，再释放根容器资�
 
 ## 按 key 声明依赖契约
 
-`verse<T>(key)` 声明同步契约，`verseAsync<T>(key)` 声明异步契约。消费者只需要契约，不需要提供方的 Ripple 对象：
+`verse<T>(key)` 声明一个按 key 查找实现的同步契约。消费者只需要契约，不需要提供方的 Ripple 对象：
 
 ```ts
-import { Cyrene, ripple, verse, verseAsync } from 'cyrenex';
+import { Cyrene, ripple, verse } from 'cyrenex';
 
 interface AgentOptions {
   prefix: string;
 }
 
 const AgentConfig = verse<AgentOptions>('agentConfig');
-const Database = verseAsync<{ query(): string[] }>('database');
-const Agent = ripple(
-  'agent',
-  { config: AgentConfig, database: Database },
-  ({ config, database }) => ({
-    list: () => database.query().map(name => `${config.prefix}: ${name}`),
-  }),
-);
+const Agent = ripple('agent', { config: AgentConfig }, ({ config }) => ({
+  label: (name: string) => `${config.prefix}: ${name}`,
+}));
 
 const app = new Cyrene().use(
   ripple(AgentConfig, () => ({ prefix: 'app' })),
-  ripple(Database, async () => ({ query: () => ['Alice'] })),
   Agent,
 );
 
-const agent = await app.ripples.agent;
-agent.list(); // ['app: Alice']
+app.ripples.agent.label('Alice'); // 'app: Alice'
 await app.dispose();
 ```
 
-| 契约                 | 实现要求               | 解析结果     |
-| -------------------- | ---------------------- | ------------ |
-| `verse<T>(key)`      | 解析结果不能是 Promise | `T`          |
-| `verseAsync<T>(key)` | 同步或异步实现         | `Promise<T>` |
-
 - 契约按 key 查找实现，不要求是同一个 verse 对象。提供方可以写 `ripple('agentConfig', factory)`，也可以写 `ripple(AgentConfig, factory)`，后者会额外校验返回类型。
 - 实现必须通过 `use()` 或其他 Ripple 的依赖进入注册表。由于允许动态注册，缺失的实现要到解析时才会报错。
-- 同步契约的实现返回 Promise 时，在解析时抛出 `InvalidDependencyError`。
+- 实现必须同步返回。解析结果是 Promise 时抛出 `InvalidDependencyError`。需要异步初始化的服务，直接依赖它的 Ripple 声明，或让实现同步返回一个内部处理异步操作的对象。
 - 显式指定 `T` 后 key 类型默认为 `string`。需要累积精确的公开属性名时，写成 `verse<AgentOptions, 'agentConfig'>('agentConfig')`。
 
 ## 替换实现

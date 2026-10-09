@@ -19,17 +19,17 @@ export interface Ripple<
   Key extends string = string,
 > {
   readonly key: Key;
-  readonly [rippleBrand]?: { result: T; inputs: Inputs; async: Async };
+  readonly [rippleBrand]: { result: T; inputs: Inputs; async: Async };
 }
 
-/** 按 key 引用实现的契约。 */
-export interface Verse<T = unknown, Async extends boolean = boolean, Key extends string = string> {
+/** 按 key 引用实现的同步契约。 */
+export interface Verse<T = unknown, Key extends string = string> {
   readonly key: Key;
-  readonly [verseBrand]?: { result: T; async: Async };
+  readonly [verseBrand]: { result: T };
 }
 
 export interface LazyRef<T = unknown, Async extends boolean = boolean> {
-  readonly [lazyBrand]?: { result: T; async: Async };
+  readonly [lazyBrand]: { result: T; async: Async };
 }
 
 export interface Lazy<T, Async extends boolean = boolean> {
@@ -54,17 +54,18 @@ export type ResolveInputs<T> = {
 
 export type AsyncResult<T, Async extends boolean> = Async extends true ? Promise<T> : T;
 
-export type InferAsync<D> = D extends Ripple<unknown, unknown, infer A> | Verse<unknown, infer A>
-  ? A
-  : false;
+export type InferAsync<D> = D extends Ripple<unknown, unknown, infer A> ? A : false;
 
-export type Resolved<D> = D extends Ripple<infer T, unknown, infer A> | Verse<infer T, infer A>
-  ? AsyncResult<T, A>
-  : unknown;
+export type Resolved<D> =
+  D extends Ripple<infer T, unknown, infer A>
+    ? AsyncResult<T, A>
+    : D extends Verse<infer T>
+      ? T
+      : unknown;
 
 type AsyncMode<T> =
   true extends InferAsync<T>
-    ? [T] extends [Ripple<unknown, unknown, true> | Verse<unknown, true>]
+    ? [T] extends [Ripple<unknown, unknown, true>]
       ? 'async'
       : 'maybe'
     : never;

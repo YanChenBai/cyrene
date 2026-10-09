@@ -21,37 +21,26 @@ export interface Definition {
 }
 
 const definitions = new WeakMap<object, Definition>();
-const verses = new WeakMap<object, { async: boolean }>();
+const verses = new WeakSet<object>();
 const lazies = new WeakMap<object, () => Ripple | Verse>();
 const lifetimes: readonly Lifetime[] = ['singleton', 'scoped', 'transient'];
 
 function ripple<T, const K extends string, R extends NoInfer<T>>(
-  contract: Verse<T, false, K>,
+  contract: Verse<T, K>,
   factory: (() => R) & (FactoryAsync<R> extends false ? unknown : never),
   options?: RippleOptions,
 ): Ripple<T, {}, false, K>;
-function ripple<T, const K extends string>(
-  contract: Verse<T, true, K>,
-  factory: () => NoInfer<T> | PromiseLike<NoInfer<T>>,
-  options?: RippleOptions,
-): Ripple<T, {}, true, K>;
 function ripple<
   T,
   const K extends string,
   const D extends Record<PropertyKey, unknown>,
   R extends NoInfer<T>,
 >(
-  contract: Verse<T, false, K>,
+  contract: Verse<T, K>,
   deps: D & (FactoryAsync<never, D> extends false ? unknown : never),
   factory: ((deps: ResolveInputs<D>) => R) & (FactoryAsync<R> extends false ? unknown : never),
   options?: RippleOptions,
 ): Ripple<T, D, false, K>;
-function ripple<T, const K extends string, const D extends Record<PropertyKey, unknown>>(
-  contract: Verse<T, true, K>,
-  deps: D,
-  factory: (deps: ResolveInputs<D>) => NoInfer<T> | PromiseLike<NoInfer<T>>,
-  options?: RippleOptions,
-): Ripple<T, D, true, K>;
 function ripple<const K extends string, T>(
   key: K,
   factory: () => T,
@@ -66,7 +55,6 @@ function ripple<const K extends string, const D extends Record<PropertyKey, unkn
 
 /** 声明服务：key 或 Verse 契约、可选依赖、工厂和生命周期。 */
 function ripple(keyOrContract: string | Verse, ...args: [unknown, unknown?, unknown?]): Ripple {
-  const contract = isVerse(keyOrContract) ? verses.get(keyOrContract) : undefined;
   const key = isVerse(keyOrContract) ? keyOrContract.key : keyOrContract;
 
   const [inputs, factory, options = {}] = (
@@ -88,33 +76,24 @@ function ripple(keyOrContract: string | Verse, ...args: [unknown, unknown?, unkn
 
   definitions.set(declaration, {
     inputs: Object.freeze({ ...inputs }),
-    // 异步契约统一返回 Promise，同步抛错也转为拒绝。
-    invoke: contract?.async ? values => Promise.resolve().then(() => call(values)) : call,
+    invoke: call,
     lifetime,
-    synchronous: contract?.async === false,
+    synchronous: isVerse(keyOrContract),
   });
 
-  return declaration;
+  // 类型标记只存在于类型层面。
+  return declaration as Ripple;
 }
 
 export { ripple };
 
-/** 声明同步契约：实现必须同步返回。 */
-export function verse<T, const K extends string = string>(key: K): Verse<T, false, K> {
-  return createVerse(key, false);
-}
-
-/** 声明异步契约：解析结果统一为 Promise。 */
-export function verseAsync<T, const K extends string = string>(key: K): Verse<T, true, K> {
-  return createVerse(key, true);
-}
-
-function createVerse(key: string, async: boolean): Verse<never, never, never> {
+/** 声明按 key 查找实现的契约：实现必须同步返回。 */
+export function verse<T, const K extends string = string>(key: K): Verse<T, K> {
   assertKey(key);
   const reference = Object.freeze({ key });
-  verses.set(reference, { async });
+  verses.add(reference);
 
-  return reference as Verse<never, never, never>;
+  return reference as Verse<T, K>;
 }
 
 /** 延迟依赖：注入带 resolve() 的句柄，回调可引用后定义的声明。 */
@@ -124,7 +103,7 @@ export function lazy<D extends Ripple | Verse>(
   const reference = Object.freeze({});
   lazies.set(reference, getTarget);
 
-  return reference;
+  return reference as LazyRef<InferInput<D>, InferAsync<D>>;
 }
 
 export function isRipple(value: unknown): value is Ripple {
@@ -133,10 +112,6 @@ export function isRipple(value: unknown): value is Ripple {
 
 export function isVerse(value: unknown): value is Verse {
   return isObject(value) && verses.has(value);
-}
-
-export function isVerseAsync(value: Verse): boolean {
-  return verses.get(value)?.async === true;
 }
 
 export function isLazy(value: unknown): value is LazyRef {

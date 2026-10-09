@@ -8,7 +8,6 @@ import {
   lazy,
   ripple,
   verse,
-  verseAsync,
 } from '../src/index.ts';
 import type { Ripple } from '../src/index.ts';
 
@@ -95,17 +94,15 @@ describe('resolution', () => {
     expect(() => new Cyrene().use(Loop).resolve(Loop)).toThrow(CircularDependencyError);
   });
 
-  it('resolves verse contracts by key', async () => {
+  it('resolves verse contracts by key', () => {
     const Port = verse<number>('port');
-    const AsyncPort = verseAsync<number>('port');
     const PortImpl = ripple(Port, () => 3000);
-    const Server = ripple('server', { port: Port, later: lazy(() => AsyncPort) }, deps => deps);
+    const Server = ripple('server', { port: Port, later: lazy(() => Port) }, deps => deps);
     const app = new Cyrene().use(Server, PortImpl);
 
     expect(app.resolve(Port)).toBe(3000);
-    await expect(app.resolve(AsyncPort)).resolves.toBe(3000);
     expect(app.ripples.server.port).toBe(3000);
-    await expect(app.ripples.server.later.resolve()).resolves.toBe(3000);
+    expect(app.ripples.server.later.resolve()).toBe(3000);
 
     const Bad = ripple('bad', async () => 1);
     const BadPort = verse<number>('bad');
