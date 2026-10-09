@@ -28,7 +28,7 @@ export async function runAsync(): Promise<void> {
     },
   }));
 
-  // Report 本身同步创建，只有 run() 才解析异步目标。
+  // Report 为同步声明，仅在调用 run() 时解析异步目标。
   const Report = ripple('report', { users: lazy(() => Users) }, ({ users }) => ({
     run: async () => (await users.resolve()).list().join(', '),
   }));

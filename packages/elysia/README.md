@@ -55,7 +55,7 @@ await app.decorator.cyrene.dispose();
 - 同步入口返回实例，异步入口返回 `Promise`；异步路由请使用 `async` / `await`。
 - 多次 `useRipples()` 会累积入口类型；同一声明可以重复注册，不同声明不能占用相同 key。
 - 间接依赖自动收集，只有显式注册的入口会作为 `ripples` 属性公开。
-- 首次解析后依赖图锁定，所有注册和 `cyrene.override()` 都应在处理请求前完成。
+- 注册和 `cyrene.override()` 可以随时调用；override 会结束目标及其依赖者，下次读取时重建。
 - `ripples` 是只读属性访问视图，不支持通过 `Object.keys()`、展开运算符或 JSON 序列化列出服务；查看依赖图请用 `cyrene.inspect()`。
 
 <a id="shared-routes"></a>
@@ -87,9 +87,19 @@ const app = new Elysia().use(container).use(first).use(second);
 ## 生命周期
 
 默认 `singleton` 在容器内共享，包含并发请求发起的异步初始化。
-`transient` 每次读取属性都会新建实例，**不是每个请求一个实例**；其资源仍由容器统一持有并在关闭时释放。
+`transient` 每次读取属性都会新建实例，**不是每个请求一个实例**。
 
-插件的 `onStop` 钩子会调用 `cyrene.dispose()`，释放实现了 `Symbol.dispose` 或 `Symbol.asyncDispose` 的资源。清理顺序、借用资源和初始化等待沿用 Cyrene 的规则。
+`ripples` 从根容器解析，通过它读取的 `scoped` 服务等同于单例。需要每个请求一份实例时，为请求创建作用域，并在请求结束时关闭：
+
+```ts
+const app = new Elysia()
+  .use(container)
+  .derive(() => ({ scope: container.decorator.cyrene.scope() }))
+  .onAfterResponse(({ scope }) => scope.dispose())
+  .get('/', ({ scope }) => scope.resolve(Session).user);
+```
+
+插件的 `onStop` 钩子会调用 `cyrene.dispose()`，释放实现了 `Symbol.dispose` 或 `Symbol.asyncDispose` 的资源。清理顺序和初始化等待沿用 Cyrene 的规则。
 
 Elysia 适配器是否等待异步停止钩子取决于其实现。需要保证资源清理完成并捕获清理错误时，显式等待容器：
 

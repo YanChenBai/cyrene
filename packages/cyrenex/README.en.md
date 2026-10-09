@@ -1,6 +1,6 @@
 <h1 align="center">Cyrene</h1>
 
-<p align="center">A TypeScript dependency injection library with lazy initialization, type inference, and resource disposal.</p>
+<p align="center">A TypeScript dependency injection library with lazy initialization, scopes, runtime overrides, and resource disposal.</p>
 
 <p align="center"><a href="./README.md">简体中文</a> · English</p>
 
@@ -38,63 +38,31 @@ console.log(app.ripples.message); // Hello, Cyrene!
 await app.dispose();
 ```
 
-`ripple()` declares a service, `use()` registers an entry, and the first read of `ripples` creates its instance.
-Synchronous services return instances directly; asynchronous services return promises.
+`ripple()` declares a service, `use()` registers an entry, and reading `ripples` creates the instance on first access.
+Synchronous services return the instance directly; asynchronous services return a Promise.
 
 <a id="features"></a>
 
 ## Features
 
-- **Explicit dependencies** — Declare dependencies and factories with `ripple()`. Plain inputs pass through unchanged.
-- **Type inference** — Factory inputs and instances are inferred. Chained `use()` calls accumulate public entry types.
-- **Async initialization** — Independent branches initialize in parallel. Concurrent singleton resolutions share initialization.
-- **Overrides before resolution** — Replace implementations before the first resolution, which validates and locks the graph.
-- **Lazy dependencies** — Inject a resolution handle with `lazy()`, respecting the target lifetime.
-- **Resource disposal** — Dispose in reverse completion order through Symbol disposal protocols or `await using`.
+- **Explicit dependencies**: `ripple()` describes dependencies and a factory; plain input values pass through unchanged
+- **Type inference**: factory inputs and instance types are inferred, and chained `use()` calls accumulate entry key types
+- **Async initialization**: dependencies initialize in parallel, and concurrent resolutions share one singleton initialization
+- **Three lifetimes**: `singleton`, `scoped`, and `transient`, with `app.scope()` creating scopes
+- **Register and replace at any time**: `use()` works after resolution; `override()` ends the target and every instance that depends on it
+- **Lazy resolution**: `lazy()` injects a resolve handle and can reference declarations defined later
+- **Unified disposal**: resources are released in reverse completion order, with Symbol disposal protocols and `await using`
 
-## Eager initialization
-
-Keep resolving on demand, or explicitly warm up the container before accepting requests or running tasks:
-
-```ts
-const app = new Cyrene().use(Service);
-try {
-  await app.init();
-  // All reachable singletons are ready for application work.
-} finally {
-  await app.dispose();
-}
-```
-
-`init(): Promise<void>` initializes every singleton in the effective graph, including internal dependencies and lazy targets, reusing pending or completed initialization.
-It does not independently pre-create transients. Strong dependencies of singletons still create transients normally, using the effective lifetime after overrides.
-
-The call immediately locks configuration and validates the complete graph before starting independent branches concurrently. Repeated calls return the same Promise, including failures.
-Failures are reported after all batch branches settle, without automatic rollback or retry. Dispose the container even after failure to release resources.
-`dispose()` waits for an accepted initialization batch. Calls to `init()` after shutdown begins return a rejected Promise.
-Do not await the same container's `init()` inside a factory: it would wait for itself to finish.
-
-## Declarations and instances
+## Declarations and registration
 
 ```text
 ripple(key, factory)       → describe how to create a service
-new Cyrene().use(Service)  → register a public entry and collect dependencies
-app.ripples.service       → resolve an instance, initializing on first access
-await app.dispose()       → wait for initialization and release resources
+new Cyrene().use(Service)  → register an entry and collect its dependencies
+app.ripples.service        → get the instance, initialized on first access
+await app.dispose()        → wait for initialization, then release resources
 ```
 
-- Use `ripple(key, factory)` or `ripple(key, deps, factory)`. Keys are immutable, non-empty strings.
-- Reference Ripple objects as dependencies. Input property names may differ from their target keys.
-- Plain inputs, including nested objects and ordinary promises, pass through unchanged.
-
-| Lifetime              | Creation and reuse                                                     |
-| --------------------- | ---------------------------------------------------------------------- |
-| `singleton` (default) | One instance per container; concurrent initialization shares a promise |
-| `transient`           | The factory runs on every resolution                                   |
-
-## Registration and dependencies
-
-`use()` registers public entries and automatically collects their dependencies:
+`use()` only decides which services are public entries. Internal dependencies are collected automatically:
 
 ```ts
 const Config = ripple('config', () => ({ prefix: 'app' }));
@@ -107,27 +75,21 @@ const Users = ripple('users', { logger: Logger }, ({ logger }) => ({
 
 const app = new Cyrene().use(Users);
 
-app.ripples.users.describe(); // Public entry
-app.resolve(Config).prefix; // Internal dependency, resolved by declaration
-// app.ripples.config is not available
+app.ripples.users.describe(); // public entry
+app.resolve(Config).prefix; // internal dependency, resolved by declaration
+// app.ripples.config does not exist
 ```
 
-Expose more entries with `new Cyrene().use(Users).use(Logger, Config)`.
+- Dependencies reference Ripple objects, and input names can differ from target keys. Plain inputs, including nested objects and Promises, are passed to the factory unchanged.
+- Registering the same declaration again is idempotent. Different declarations with the same key throw.
+- `use()` can be called after resolution, and existing scopes see the new entries.
+- `resolve(Ripple)` looks up by declaration identity. `resolve(key)` looks up by key and can reach internal dependencies; keys without accumulated types resolve to `unknown`.
 
 > [!TIP]
-> Chain `use()` calls or use their return values to accumulate public key types.
-> After separate registration calls, `resolve(Ripple)` still infers the instance type.
+> Chain `use()` or keep its return value to accumulate entry key types.
+> Entries added later can still be resolved with exact types through `resolve(Ripple)`.
 
-<details>
-<summary>Declaration identity and registration rules</summary>
-
-- `use()` mutates and returns the same container. A batch is registered only after all entries pass validation.
-- Registering the same declaration again is idempotent. Different declarations cannot share a key in the effective graph.
-- Explicitly registering an internal dependency makes it a public entry.
-- `resolve(Ripple)` uses declaration identity. `resolve(key)` can access internal nodes, but keys not accumulated in the container type return `unknown`.
-- `isRipple()` identifies declarations created by the library.
-
-Use ordinary functions to create declarations with different keys:
+To reuse declaration logic, create Ripples with different keys from a plain function:
 
 ```ts
 const logger = <const K extends string>(key: K, scope: string) => ripple(key, () => ({ scope }));
@@ -135,11 +97,60 @@ const logger = <const K extends string>(key: K, scope: string) => ripple(key, ()
 const app = new Cyrene().use(logger('auditLogger', 'audit'), logger('requestLogger', 'request'));
 ```
 
-</details>
+## Synchronous and asynchronous services
+
+```ts
+const Config = ripple('config', () => ({ name: 'demo' }));
+const Database = ripple('database', async () => ({ query: () => ['Alice'] }));
+const Users = ripple('users', { database: Database }, ({ database }) => ({
+  list: () => database.query(),
+}));
+
+await using app = new Cyrene().use(Config, Users);
+
+app.ripples.config.name; // synchronous, returns the instance
+const users = await app.ripples.users; // async dependency, returns a Promise
+users.list();
+```
+
+| Case                                         | Result                                                     |
+| -------------------------------------------- | ---------------------------------------------------------- |
+| Factory and all strong dependencies are sync | Returns the instance                                       |
+| Factory or any strong dependency is async    | Returns a Promise; the factory receives ready dependencies |
+| Only a lazy target is async                  | The consumer stays sync; the handle returns a Promise      |
+| Factory returns `T \| Promise<T>`            | The union type is preserved                                |
+
+An async singleton returns the same Promise during and after initialization.
+
+## Lifetimes and scopes
+
+| Lifetime              | Cached in                                    | Resources owned by         |
+| --------------------- | -------------------------------------------- | -------------------------- |
+| `singleton` (default) | The root container, shared by all scopes     | The root container         |
+| `scoped`              | Each scope; the root container counts as one | The scope                  |
+| `transient`           | Not cached; created on every resolution      | The scope that resolved it |
+
+```ts
+const Db = ripple('db', () => openDb());
+const Session = ripple('session', { db: Db }, ({ db }) => db.session(), { lifetime: 'scoped' });
+
+const app = new Cyrene().use(Session);
+
+{
+  await using request = app.scope();
+  request.ripples.session === request.ripples.session; // reused within the scope
+} // closing the scope releases its session
+
+await app.dispose(); // closes live scopes first, then releases root resources
+```
+
+- A scope from `app.scope()` shares the registry and singletons with the root container, and exposes only `ripples`, `resolve()`, and `dispose()`.
+- A singleton cannot depend on a scoped service directly, through a transient, or through a lazy handle; doing so throws `InvalidDependencyError`.
+- Disposable transient instances belong to the scope that resolved them and are released when it closes. Creating a scope per request keeps these resources from piling up until container shutdown.
 
 ## Dependency contracts by key
 
-`verse<T>(key)` declares a synchronous contract; `verseAsync<T>(key)` declares an asynchronous contract. Consumers can depend on contracts without importing provider Ripple objects:
+`verse<T>(key)` declares a synchronous contract and `verseAsync<T>(key)` an asynchronous one. Consumers only need the contract, not the provider's Ripple:
 
 ```ts
 import { Cyrene, ripple, verse, verseAsync } from 'cyrenex';
@@ -158,105 +169,50 @@ const Agent = ripple(
   }),
 );
 
-function agentConfigPlugin(options: AgentOptions) {
-  return ripple(AgentConfig, () => options);
-}
-
-const DatabasePlugin = ripple(Database, async () => ({ query: () => ['Alice'] }));
-const app = new Cyrene().use(agentConfigPlugin({ prefix: 'app' }), DatabasePlugin, Agent);
+const app = new Cyrene().use(
+  ripple(AgentConfig, () => ({ prefix: 'app' })),
+  ripple(Database, async () => ({ query: () => ['Alice'] })),
+  Agent,
+);
 
 const agent = await app.ripples.agent;
 agent.list(); // ['app: Alice']
 await app.dispose();
 ```
 
-Providers can still use `ripple('agentConfig', () => options)`. Matching uses the key, so consumers and providers need not share the same verse object. `ripple(AgentConfig, factory)` also checks the factory's result type.
+| Contract             | Implementation requirement     | Result       |
+| -------------------- | ------------------------------ | ------------ |
+| `verse<T>(key)`      | The result cannot be a Promise | `T`          |
+| `verseAsync<T>(key)` | Sync or async                  | `Promise<T>` |
 
-| Contract             | Implementation requirements                     | Resolution result |
-| -------------------- | ----------------------------------------------- | ----------------- |
-| `verse<T>(key)`      | Synchronous factory and all strong dependencies | `T`               |
-| `verseAsync<T>(key)` | Synchronous or asynchronous implementation      | `Promise<T>`      |
+- Contracts find implementations by key, so they do not need to be the same verse object. Providers can use `ripple('agentConfig', factory)` or `ripple(AgentConfig, factory)`; the latter also checks the return type.
+- Implementations must enter the registry through `use()` or as another Ripple's dependency. Because registration is dynamic, a missing implementation is reported at resolution time.
+- When a synchronous contract's implementation returns a Promise, resolution throws `InvalidDependencyError`.
+- After specifying `T` explicitly, the key type defaults to `string`. To accumulate an exact entry name, write `verse<AgentOptions, 'agentConfig'>('agentConfig')`.
 
-Factories receive resolved instances. A strong `verseAsync` input makes its consumer asynchronous. Accessing a synchronous implementation through an asynchronous contract preserves the provider's original string and Ripple entry behavior.
+## Overrides
 
-- Implementations must enter the effective graph through `use()` or another Ripple dependency. A verse cannot be registered and does not supply an implementation.
-- Registration order does not affect lookup. Compilation rejects missing implementations, duplicate keys, and strong cycles. Overrides are looked up using the original key.
-- Compilation detects known asynchronous implementations for synchronous contracts. Ordinary functions that dynamically return promises are rejected during resolution before invoking synchronous consumers.
-- `app.resolve(AgentConfig)` and `app.resolve(Database)` preserve contract types. Independently defined string providers cannot be statically checked against a contract's `T`; the caller must ensure compatibility.
-
-<details>
-<summary>Preserving a provider's literal key type</summary>
-
-When `T` is explicit, TypeScript does not infer the remaining defaulted key type parameter. Specify both parameters to accumulate exact public property names with `ripple(verse, factory)`:
-
-```ts
-const AgentConfig = verse<AgentOptions, 'agentConfig'>('agentConfig');
-const app = new Cyrene().use(ripple(AgentConfig, () => ({ prefix: 'app' })));
-app.ripples.agentConfig.prefix;
-```
-
-With `verse<AgentOptions>('agentConfig')`, the key type is `string`. Use `resolve(AgentConfig)` for the precise instance type, or define the provider with a string key to preserve key inference.
-
-</details>
-
-## Overrides before resolution
-
-Use the original declaration to target either a public entry or an internal dependency:
+`override(original, replacement)` targets the original declaration and can be called at any time:
 
 ```ts
 const MockConfig = ripple('mockConfig', () => ({ prefix: 'test' }));
-const app = new Cyrene().use(Users).override(Config, MockConfig);
+const app = new Cyrene().use(Users);
 
-app.ripples.users.describe(); // [test] users
-app.resolve(Config) === app.resolve(MockConfig); // Same singleton
+app.ripples.users.describe(); // [app] users
+app.override(Config, MockConfig);
+app.ripples.users.describe(); // [test] users, Users was recreated
 ```
 
-- The original key, visibility, return type, and sync/async contract remain unchanged.
-- The replacement supplies the factory, dependencies, and lifetime.
-- The first property read, `resolve()` call, or `init()` call locks configuration, even if initialization fails.
-
-<details>
-<summary>Override order and reachability</summary>
-
-- `override()` may precede `use()`. The last override for a target wins.
-- `override(original, original)` restores the original implementation.
-- The graph collects only effective dependencies. Dependencies used only by the replaced implementation are removed.
-- Override targets must remain reachable in the effective graph, including after upstream overrides.
-- A replacement can represent only one node and cannot also occupy another entry or dependency node.
-- Both the original and current replacement resolve to the node. Previous replacements no longer do.
-
-</details>
-
-## Synchronous and asynchronous services
-
-Factories run after their strong dependencies are ready:
-
-```ts
-const Config = ripple('config', () => ({ name: 'demo' }));
-const Database = ripple('database', async () => ({ query: () => ['Alice'] }));
-const Users = ripple('users', { database: Database }, ({ database }) => ({
-  list: () => database.query(),
-}));
-
-await using app = new Cyrene().use(Config, Users);
-
-app.ripples.config.name; // Synchronous instance
-const users = await app.ripples.users; // Wait for the async dependency
-users.list();
-```
-
-| Situation                                           | Result                                                             |
-| --------------------------------------------------- | ------------------------------------------------------------------ |
-| Factory and all strong dependencies are synchronous | Instance returned directly                                         |
-| Factory or any strong dependency is asynchronous    | Promise; the factory receives resolved dependencies                |
-| Only a lazy target is asynchronous                  | Consumer stays synchronous; resolving the handle returns a promise |
-| Factory returns `T \| Promise<T>`                   | The union type is preserved                                        |
-
-Entry properties are read-only. Service instances are not proxied. An async singleton keeps returning the same promise after initialization.
+- **Kept**: the original key and visibility. The types require the replacement to match the original's result and sync / async mode.
+- **From the replacement**: factory, dependencies, and `lifetime`.
+- **Old instances end**: the target and every service that strongly depends on it, including instances in scopes, are evicted and released with dependents first. They are recreated on the next resolution. Old instances still initializing are released as soon as they complete.
+- **Lazy consumers are unaffected**: the next `resolve()` on their handle returns the new implementation.
+- You can call `override()` before `use()`. The last override of a target wins, and `override(original, original)` restores the original.
+- Old instances are released in the background, and cleanup errors are reported by `dispose()`. Application code that still holds an old instance should stop using it.
 
 ## Lazy resolution
 
-During on-demand resolution, `lazy()` injects a handle that creates its target when the handle's `resolve()` is called. `init()` also eagerly initializes singleton targets:
+`lazy()` injects a handle that gets the instance under the target's lifetime only when `resolve()` is called:
 
 ```ts
 import { lazy, ripple } from 'cyrenex';
@@ -266,57 +222,28 @@ const Report = ripple('report', { users: lazy(() => Users) }, ({ users }) => ({
 }));
 ```
 
-- The callback should return a stable declaration without side effects.
-- Callbacks run during graph construction; their results are reused while configuration stays unchanged.
-- Express factory dependencies through inputs or lazy handles. Avoid awaiting public resolution or disposal on the same container inside a factory.
+- The callback runs at registration (`use()` / `override()`), may return a Ripple or a Verse, and should be stable and side-effect free.
+- Lazy inputs are not strong dependencies and can break dependency cycles. `init()` still initializes singleton lazy targets.
+- Calling `resolve()` after the handle's scope closes throws `DisposedError`.
 
-<details>
-<summary>Promises and wait cycles during initialization</summary>
-
-| Operation                                         | Registers a wait relationship  |
-| ------------------------------------------------- | ------------------------------ |
-| Calling async `lazy.resolve()` alone              | No; starts initialization only |
-| Awaiting it or returning it from an async factory | Yes                            |
-| Calling `then`, `catch`, or `finally`             | Yes, including observer chains |
-
-During initialization, a handle reuses its promise wrapper for the target instance. This wrapper differs from the public entry promise.
-Once the consumer is ready, the handle returns the target's resolution result directly.
-
-Strong dependency cycles are rejected during graph construction. Actual async wait cycles are rejected during initialization.
-
-</details>
-
-## Transient instances
-
-Use `transient` for objects such as per-task collectors or builders:
+## Eager initialization
 
 ```ts
-const Job = ripple('job', () => ({ messages: [] as string[] }), { lifetime: 'transient' });
-const Worker = ripple('worker', { job: Job }, ({ job }) => ({ job }));
-
-await using app = new Cyrene().use(Worker);
-
-app.resolve(Job) !== app.resolve(Job); // New instance on each resolution
-app.ripples.worker.job === app.ripples.worker.job; // Singleton retains its injected instance
+const app = new Cyrene().use(Service);
+try {
+  await app.init();
+  // every registered singleton is ready
+} finally {
+  await app.dispose();
+}
 ```
 
-| Operation                                             | Transient creation                                                    |
-| ----------------------------------------------------- | --------------------------------------------------------------------- |
-| Declaration, registration, override, graph inspection | Does not run factories                                                |
-| Property read or `resolve()`                          | Creates an instance each time                                         |
-| Strong dependency injection                           | Creates an instance per input property during consumer initialization |
-| `lazy.resolve()`                                      | Creates an instance per call; injecting the handle creates none       |
-| Concurrent async resolution                           | Independent initialization and different promises                     |
-
-> [!NOTE]
-> Transient reruns the factory; it does not clone an object the factory intentionally reuses.
-> Owned instances with disposal protocols remain held until container disposal. Limit their creation in long-running containers.
-
-See the [resolution design (Chinese)](./docs/CYRENE_DESIGN.md#解析) for retry, recursion, and state tracking details.
+`init()` initializes every currently registered singleton, including internal dependencies and lazy targets. It does not pre-create scoped or transient instances.
+Cached instances are reused, so it can be called again after registering more services. Failures are reported after every branch settles: one failure is rethrown as is, several become an `AggregateError`.
 
 ## Diagnostics and failures
 
-`inspect()` validates the graph and returns a snapshot without running factories or locking configuration:
+`inspect()` returns a dependency graph snapshot without running factories:
 
 ```ts
 import { formatGraph } from 'cyrenex';
@@ -324,27 +251,26 @@ import { formatGraph } from 'cyrenex';
 console.log(formatGraph(app.inspect()));
 ```
 
-| Field   | Meaning                                                             |
-| ------- | ------------------------------------------------------------------- |
-| `roots` | Explicitly registered public entries                                |
-| `nodes` | Keys and latest initialization states in the effective graph        |
-| `edges` | Consumer, input property, target, and strong/lazy dependency policy |
+| Field   | Meaning                                                           |
+| ------- | ----------------------------------------------------------------- |
+| `roots` | Explicitly registered entries                                     |
+| `nodes` | Registered keys, their `lifetime`, and instance state in the root |
+| `edges` | Consumer, input name, target, and strong / lazy kind              |
 
-Tree output uses `↗` for shared nodes and `↻` for cycles. ANSI sequences and terminal control characters are removed.
+In the tree output, `↗` marks an already expanded shared node and `↻` a cycle. ANSI sequences and terminal control characters are removed.
 
-| Failure                                                      | Behavior                       |
-| ------------------------------------------------------------ | ------------------------------ |
-| Invalid graph, invalid entry, or synchronous factory failure | Throws immediately             |
-| Async factory failure                                        | Rejects the promise            |
-| Singleton initialization failure                             | Caches the failure             |
-| Transient initialization failure                             | Retries on the next resolution |
-
-The caller must still dispose the container after a failure to release registered resources.
+| Failure                          | Behavior                                                                                      |
+| -------------------------------- | --------------------------------------------------------------------------------------------- |
+| Factory fails                    | Throws `ResolutionError`; `path` is the full chain from the entry, `cause` the original error |
+| Strong dependency cycle          | Throws `CircularDependencyError` at resolution                                                |
+| Unknown key or missing provider  | Throws `InvalidDependencyError`                                                               |
+| Async failure                    | Returns a rejected Promise                                                                    |
+| Resolving a failed service again | Failures are not cached; the factory runs again                                               |
 
 ## Resource disposal
 
-Use `await using` with a compatible runtime or TypeScript toolchain, or call `await app.dispose()` explicitly.
-Resources implement `Symbol.asyncDispose` or `Symbol.dispose`; the async protocol takes precedence:
+Use `await using`, or call `await app.dispose()` explicitly.
+Instances returned with `Symbol.asyncDispose` or `Symbol.dispose` are registered; the former takes precedence:
 
 ```ts
 const Database = ripple('database', async () => {
@@ -352,7 +278,6 @@ const Database = ripple('database', async () => {
 
   return {
     query: connection.query.bind(connection),
-
     async [Symbol.asyncDispose]() {
       await connection.close();
     },
@@ -360,37 +285,22 @@ const Database = ripple('database', async () => {
 });
 ```
 
-`openConnection` is supplied by your database driver.
+- `dispose()` is idempotent. It rejects new resolutions immediately, closes child scopes, waits for in-flight initialization, then releases resources one by one in reverse completion order. Dependencies complete first, so consumers are released before them.
+- The same object is released once. If one cleanup fails, the rest still run, and an `AggregateError` is thrown at the end.
+- Plain objects are not registered, and plain `.dispose()` methods are not part of the protocol.
+- The container only tracks initialization. Stop and await application work before closing it.
 
-| Instance                        | Ownership and disposal                                                                    |
-| ------------------------------- | ----------------------------------------------------------------------------------------- |
-| Owned with a disposal protocol  | Held until shutdown; disposed in reverse order of first completed creation                |
-| Plain object                    | Ownership is tracked through weak references; collectible when no other references remain |
-| `ownership: 'borrowed'`         | Managed by the application; not disposed by the container                                 |
-| Same object returned repeatedly | Disposed once; mixing owned and borrowed ownership throws                                 |
+## Cross-package composition
 
-> [!TIP]
-> Stop accepting work and wait for in-flight tasks before disposing the container.
-> The container waits for accepted initialization. Business methods, streams, and background tasks remain the application's responsibility.
-
-<details>
-<summary>Disposal order and responsibilities</summary>
-
-- `dispose()` is idempotent. It closes resolution immediately, waits for accepted initialization, then releases resources.
-- Strong dependencies usually complete first and are disposed after consumers. Lazy targets activated later and object aliases follow actual first-completion order.
-- Disposal continues after individual failures and reports aggregated errors at the end.
-- Singleton caches retain their results; weak ownership tracking does not change that.
-- Ordinary `.dispose()` methods and option-based cleanup callbacks are not part of the protocol.
-- Transient does not provide request scopes or automatic cleanup after each call.
-- Factories must clean up resources allocated but not returned before throwing.
-
-</details>
+Hosts and plugin packages must share one `cyrenex` module instance. Ripple, Verse, and lazy identities live inside the library, so declarations from another copy, even of the same version, cannot be used.
+Plugin packages should list `cyrenex` in `peerDependencies` and mark it external when bundling.
 
 <a id="agent"></a>
 
 ## Agent
 
-The package includes a [cyrenex skill](./skills/cyrenex/SKILL.md) for registration, overrides, lazy resolution, and disposal.
+The npm package ships a [cyrenex skill](./skills/cyrenex/SKILL.md) that helps coding agents use declarations, scopes, overrides, and disposal correctly.
+
 After installing `cyrenex`, use [skills-npm](https://github.com/antfu/skills-npm) to link it to your agent's skill directory:
 
 ```sh
@@ -398,30 +308,25 @@ npm install -D skills-npm
 npx skills-npm setup
 ```
 
-Setup detects agents, performs the initial sync, adds syncing to `package.json`'s `prepare` script, and ignores generated links.
-Future dependency installs and updates keep the skill in sync. To sync manually:
-
-```sh
-npx skills-npm
-```
+`setup` detects your agent, runs the first sync, appends the sync command to the `prepare` script in `package.json`, and adds `.gitignore` rules for the generated links.
+To sync manually, run `npx skills-npm`.
 
 <a id="development"></a>
 
 ## Development
 
-Implementation lives in [src](./src), tests in [tests](./tests), and ESM plus declarations are built into `dist/`.
-Run from this package directory:
+Source lives in [`src/`](./src) and tests in [`tests/`](./tests). The build writes ESM and type declarations to `dist/`.
 
 ```sh
 vp install
 vp run ready
 ```
 
-| Command        | Purpose                       |
-| -------------- | ----------------------------- |
-| `vp check`     | Format, lint, and type checks |
-| `vp test run`  | Tests                         |
-| `vp pack`      | Build ESM and declarations    |
-| `vp run ready` | Run checks, tests, and build  |
+| Command        | Purpose                         |
+| -------------- | ------------------------------- |
+| `vp check`     | Format, lint, and type check    |
+| `vp test run`  | Run tests                       |
+| `vp pack`      | Build ESM and type declarations |
+| `vp run ready` | Run all of the above in order   |
 
-See the [design document (Chinese)](./docs/CYRENE_DESIGN.md) and [tests](./tests/) for behavioral details.
+See the [design document](./docs/CYRENE_DESIGN.md) (Chinese) for the implementation structure.

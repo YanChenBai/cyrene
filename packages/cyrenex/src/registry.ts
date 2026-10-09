@@ -1,201 +1,150 @@
-import { assertDependency, getDefinition, isDependency } from './dependency.ts';
-import { CircularDependencyError, InvalidDependencyError } from './errors.ts';
-import { getLazyTarget, isLazy } from './lazy.ts';
-import type { Dependency, GraphEdge, Verse } from './types.ts';
-import { inputEntries } from './utils.ts';
-import { isVerse, isVerseAsync } from './verse.ts';
+import { getDefinition, getLazyTarget, isLazy, isRipple, isVerse } from './declarations.ts';
+import type { Definition } from './declarations.ts';
+import { InvalidDependencyError } from './errors.ts';
+import type { GraphEdge, Ripple, Verse } from './types.ts';
 
-export interface CompiledRegistration {
-  original: Dependency;
-  implementation: Dependency;
-  dependencies: Map<PropertyKey, GraphEdge>;
-  synchronousInputs: Set<PropertyKey>;
-  async: boolean;
+export type Input =
+  | { kind: 'value'; value: unknown }
+  | { kind: GraphEdge['kind']; target: Ripple | Verse };
+
+export interface Node {
+  readonly key: string;
+  /** 原声明；override 只替换 definition 和 inputs。 */
+  readonly declaration: Ripple;
+  definition: Definition;
+  inputs: Map<PropertyKey, Input>;
+  /** override 后递增，旧代的实例视为已结束。 */
+  generation: number;
 }
 
-export type Registry = Map<string, CompiledRegistration>;
+/** 容器共享的注册表：key 到节点，以及公开入口。 */
+export class Registry {
+  readonly nodes = new Map<string, Node>();
 
-/** 先收集有效实现的闭包，再检查强依赖环；只发布完整且合法的快照。 */
-export function compileRegistry(
-  roots: Iterable<Dependency>,
-  overrides: ReadonlyMap<Dependency, Dependency>,
-): { registry: Registry; identities: Map<Dependency, string> } {
-  const registry: Registry = new Map();
-  const identities = new Map<Dependency, string>();
-  const reachable = new Set<Dependency>();
+  readonly entries = new Set<string>();
 
-  const references: { registration: CompiledRegistration; input: PropertyKey; target: Verse }[] =
-    [];
+  #overrides = new Map<Ripple, Ripple>();
 
-  const visit = (original: Dependency): string => {
-    assertDependency(original);
-    const key = original.key;
-    const existing = registry.get(key);
+  use(declarations: readonly Ripple[]): void {
+    for (const declaration of declarations) {
+      getDefinition(declaration);
+      const existing = this.nodes.get(declaration.key);
+
+      if (existing && existing.declaration !== declaration) {
+        throw new InvalidDependencyError(`Duplicate Ripple key: ${declaration.key}`);
+      }
+    }
+
+    for (const declaration of declarations) {
+      this.#register(declaration);
+      this.entries.add(declaration.key);
+    }
+  }
+
+  /**
+   * 设置替身；目标已注册时返回受影响的 key（目标及其所有强依赖者）。
+   */
+  override(target: Ripple, replacement: Ripple): Set<string> {
+    getDefinition(target);
+    getDefinition(replacement);
+
+    if (replacement === target) {
+      this.#overrides.delete(target);
+    } else {
+      this.#overrides.set(target, replacement);
+    }
+
+    const node = this.nodes.get(target.key);
+
+    if (!node || node.declaration !== target) {
+      return new Set();
+    }
+
+    this.#bind(node, replacement);
+    const affected = this.#dependents(node.key);
+
+    for (const key of affected) {
+      this.nodes.get(key)!.generation++;
+    }
+
+    return affected;
+  }
+
+  get(target: string | Ripple | Verse): Node {
+    if (typeof target !== 'string' && !isRipple(target) && !isVerse(target)) {
+      throw new InvalidDependencyError('Expected a key, Ripple or Verse');
+    }
+
+    const key = typeof target === 'string' ? target : target.key;
+    const node = this.nodes.get(key);
+
+    if (!node) {
+      throw new InvalidDependencyError(`Unknown registration key: ${key}`);
+    }
+
+    if (isRipple(target) && node.declaration !== target) {
+      throw new InvalidDependencyError(`Unregistered Ripple declaration: ${key}`);
+    }
+
+    return node;
+  }
+
+  #register(declaration: Ripple): Node {
+    const existing = this.nodes.get(declaration.key);
 
     if (existing) {
-      if (existing.original !== original) {
-        throw new InvalidDependencyError(`Duplicate Ripple key: ${key}`);
+      if (existing.declaration !== declaration) {
+        throw new InvalidDependencyError(`Duplicate Ripple key: ${declaration.key}`);
       }
 
-      return key;
+      return existing;
     }
 
-    const implementation = overrides.get(original) ?? original;
+    const node = { key: declaration.key, declaration, generation: 0 } as Node;
+    this.nodes.set(node.key, node);
+    this.#bind(node, this.#overrides.get(declaration) ?? declaration);
 
-    const registration: CompiledRegistration = {
-      original,
-      implementation,
-      dependencies: new Map(),
-      synchronousInputs: new Set(),
-      async: getDefinition(implementation).async,
-    };
+    return node;
+  }
 
-    registry.set(key, registration);
-    reachable.add(original);
-    registerIdentity(identities, original, key);
-    registerIdentity(identities, implementation, key);
+  /** 绑定实现，并注册其引用的 Ripple；Verse 在解析时按 key 查找。 */
+  #bind(node: Node, implementation: Ripple): void {
+    node.definition = getDefinition(implementation);
+    node.inputs = new Map();
 
-    for (const [input, value] of inputEntries(getDefinition(implementation).inputs)) {
-      const deferred = isLazy(value);
-      const target = deferred ? getLazyTarget(value) : value;
+    for (const key of Reflect.ownKeys(node.definition.inputs)) {
+      const value: unknown = node.definition.inputs[key];
+      const lazy = isLazy(value);
+      const target = lazy ? getLazyTarget(value) : value;
 
-      if (isVerse(target)) {
-        references.push({ registration, input, target });
-        continue;
-      }
-
-      if (isDependency(target)) {
-        registration.dependencies.set(input, {
-          from: key,
-          to: visit(target),
-          input,
-          kind: deferred ? 'lazy' : 'dependency',
-        });
+      if (isRipple(target) || isVerse(target)) {
+        node.inputs.set(key, { kind: lazy ? 'lazy' : 'dependency', target });
+      } else {
+        node.inputs.set(key, { kind: 'value', value });
       }
     }
 
-    return key;
-  };
-
-  for (const root of roots) {
-    visit(root);
-  }
-
-  // 等完整闭包收集结束后再按 key 关联，避免入口顺序影响查找。
-  for (const { registration, input, target } of references) {
-    if (!registry.has(target.key)) {
-      throw new InvalidDependencyError(`Missing Verse implementation: ${target.key}`);
-    }
-
-    registration.dependencies.set(input, {
-      from: registration.original.key,
-      to: target.key,
-      input,
-      kind: 'dependency',
-    });
-
-    if (isVerseAsync(target)) {
-      registration.async = true;
-    } else {
-      registration.synchronousInputs.add(input);
+    for (const input of node.inputs.values()) {
+      if (input.kind !== 'value' && isRipple(input.target)) {
+        this.#register(input.target);
+      }
     }
   }
 
-  for (const target of overrides.keys()) {
-    if (!reachable.has(target)) {
-      throw new InvalidDependencyError(`Override target is not reachable: ${target.key}`);
-    }
-  }
+  /** 沿强依赖反向收集，包含起点。 */
+  #dependents(key: string): Set<string> {
+    const result = new Set([key]);
 
-  validateRegistry(registry);
-  validateContracts(registry);
-
-  return { registry, identities };
-}
-
-/** 在强依赖环校验后传播已知异步性，拒绝同步契约绑定异步实现。 */
-function validateContracts(registry: Registry): void {
-  const visited = new Set<string>();
-
-  const visit = (key: string): boolean => {
-    const registration = registry.get(key)!;
-
-    if (visited.has(key)) {
-      return registration.async;
-    }
-
-    for (const edge of registration.dependencies.values()) {
-      if (edge.kind === 'dependency') {
-        const async = visit(edge.to);
-
-        if (async && registration.synchronousInputs.has(edge.input)) {
-          throw new InvalidDependencyError(
-            `Synchronous Verse requires a synchronous implementation: ${edge.to}`,
-          );
+    for (const current of result) {
+      for (const node of this.nodes.values()) {
+        for (const input of node.inputs.values()) {
+          if (input.kind === 'dependency' && input.target.key === current) {
+            result.add(node.key);
+          }
         }
-
-        registration.async ||= async;
       }
     }
 
-    if (registration.async && getDefinition(registration.implementation).synchronous) {
-      throw new InvalidDependencyError(
-        `Synchronous Verse requires a synchronous implementation: ${key}`,
-      );
-    }
-
-    visited.add(key);
-
-    return registration.async;
-  };
-
-  for (const key of registry.keys()) {
-    visit(key);
-  }
-}
-
-/** 一个声明不能同时代表两个槽位，替身也遵循这个约束。 */
-function registerIdentity(identities: Map<Dependency, string>, target: Dependency, key: string) {
-  const existing = identities.get(target);
-
-  if (existing !== undefined && existing !== key) {
-    throw new InvalidDependencyError(`Ripple occupies multiple keys: ${existing}, ${key}`);
-  }
-
-  identities.set(target, key);
-}
-
-/** 构图只检查强依赖环；lazy 的真实等待环在解析时检查。 */
-function validateRegistry(registry: Registry): void {
-  const visited = new Set<string>();
-  const active = new Set<string>();
-
-  const path: string[] = [];
-
-  const visit = (key: string) => {
-    if (active.has(key)) {
-      throw new CircularDependencyError(`Circular dependency: ${[...path, key].join(' -> ')}`);
-    }
-
-    if (visited.has(key)) {
-      return;
-    }
-
-    active.add(key);
-    path.push(key);
-
-    for (const edge of registry.get(key)!.dependencies.values()) {
-      if (edge.kind === 'dependency') {
-        visit(edge.to);
-      }
-    }
-
-    path.pop();
-    active.delete(key);
-    visited.add(key);
-  };
-
-  for (const key of registry.keys()) {
-    visit(key);
+    return result;
   }
 }

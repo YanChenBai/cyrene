@@ -22,7 +22,7 @@ For a minimal example, see the [core quick start](../packages/cyrenex/README.en.
 | ---------------------------------------- | ------------------------------------------------------------------------------------ |
 | [basic.ts](./src/basic.ts)               | Synchronous dependencies, singleton reuse, overrides, graph inspection, and disposal |
 | [async.ts](./src/async.ts)               | Async initialization, lazy dependencies, and concurrent resolution                   |
-| [registration.ts](./src/registration.ts) | Separate registration calls, declaration resolution, and borrowed resources          |
+| [registration.ts](./src/registration.ts) | Separate registration calls, declaration resolution, and external resources          |
 
-[src/index.ts](./src/index.ts) runs all three scenarios. Assertions check instance identity, creation counts, and disposal ownership.
+[src/index.ts](./src/index.ts) runs all three scenarios. Assertions check instance identity, creation counts, and disposal responsibilities.
 See the [core documentation](../packages/cyrenex/README.en.md) for the API and behavior.

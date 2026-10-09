@@ -22,7 +22,7 @@ vp run --filter @cyrenex/example start
 | ---------------------------------------- | ---------------------------------------------- |
 | [basic.ts](./src/basic.ts)               | 同步依赖、单例复用、替换实现、依赖图与资源清理 |
 | [async.ts](./src/async.ts)               | 异步初始化、lazy 依赖与并发解析                |
-| [registration.ts](./src/registration.ts) | 分步注册、声明解析与 borrowed 资源             |
+| [registration.ts](./src/registration.ts) | 分步注册、声明解析与外部资源                   |
 
 [src/index.ts](./src/index.ts) 依次运行三个场景，示例中的断言检查实例身份、创建次数与清理责任。
 详细 API 与行为说明见 [核心包文档](../packages/cyrenex/README.md)。

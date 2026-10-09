@@ -1,6 +1,6 @@
 ---
 name: cyrenex-elysia
-description: Integrate cyrenex services into Elysia routes with elysiaCyrene and useRipples. Use for typed route dependencies, shared application containers, pre-request overrides, request tests, and container shutdown in projects using @cyrenex/elysia.
+description: Integrate cyrenex services into Elysia routes with elysiaCyrene and useRipples. Use for typed route dependencies, shared application containers, per-request scopes, overrides, request tests, and container shutdown in projects using @cyrenex/elysia.
 ---
 
 # Cyrene 与 Elysia 集成
@@ -46,14 +46,14 @@ try {
 | `.use(container)`                                            | 安装 `cyrene` decorator 和停止钩子 | 放在 useRipples 前                         |
 | `.use(useRipples(Service))`                                  | 注册并暴露带类型的 `ripples`       | 放在需要这些入口的路由前                   |
 | `ripples.service`                                            | 按需解析服务                       | 同步实例直接使用，异步实例需 await         |
-| `container.decorator.cyrene.override(Original, Replacement)` | 测试或环境替换                     | 必须在首次请求或其他解析之前               |
+| `container.decorator.cyrene.override(Original, Replacement)` | 测试或环境替换                     | 随时可用；结束目标及其依赖者的旧实例       |
 | `await container.decorator.cyrene.dispose()`                 | 等待资源清理                       | handle/fetch 测试由调用方在 finally 中执行 |
 
 - 每次 `elysiaCyrene()` 都创建新容器；不要在同一应用的每个路由模块里分别调用它。
 - 每个独立路由模块显式 `.use(container).use(useRipples(...))`，再挂载到主应用，保证类型传播和共享实例都正确。
 - 多次 `useRipples()` 累积入口类型；注册本身不执行工厂。只注册业务所需入口，内部依赖自动收集。
 - 同声明重复注册幂等；不同声明不能使用相同 key。
-- 完成所有模块注册和覆盖后再处理请求。第一次读取服务就锁定配置，不要在 handler 中调用 useRipples、use 或 override。
+- 注册和覆盖可以随时进行，但应在应用组合阶段完成；不要在 handler 中调用 useRipples、use 或 override。
 
 ## 异步服务与请求状态
 
@@ -62,6 +62,8 @@ try {
 
 不要把用户身份、request 或 params 存进共享单例。将这些请求数据作为服务方法参数传入。
 `lifetime: 'transient'` 表示每次读取/解析创建实例，不代表每个 HTTP 请求一个实例；同一请求读两次也可能得到两个实例。
+
+需要每个请求一份实例时，把服务声明为 `lifetime: 'scoped'`，用 `.derive(() => ({ scope: container.decorator.cyrene.scope() }))` 为请求创建作用域，通过 `scope.resolve(Service)` 读取，并在 `onAfterResponse` 中 `scope.dispose()`。`ripples` 从根容器解析，读取 scoped 服务时等同单例。
 
 ## 关闭与测试
 

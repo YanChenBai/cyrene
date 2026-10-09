@@ -44,7 +44,7 @@ await app.dispose();
 
 - 通过服务声明引用依赖，自动推导输入和返回类型。
 - 同步服务直接返回实例，异步服务返回 Promise。
-- 支持单例、每次解析新建实例、延迟解析和初始化前替换实现。
+- 支持 singleton、scoped、transient 生命周期与作用域，延迟解析，以及随时注册和替换实现。
 - 支持依赖图检查及 `Symbol.dispose` / `Symbol.asyncDispose` 资源清理。
 
 ## 包与示例

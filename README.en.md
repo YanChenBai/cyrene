@@ -44,7 +44,7 @@ See the [core documentation](./packages/cyrenex/README.en.md) for dependencies, 
 
 - Reference service declarations as dependencies, with inferred input and return types.
 - Resolve synchronous services directly and asynchronous services through promises.
-- Use singletons, transient instances, lazy dependencies, and overrides before initialization.
+- Use singleton, scoped, and transient lifetimes with scopes, lazy dependencies, and register or override at any time.
 - Inspect dependency graphs and release resources through `Symbol.dispose` / `Symbol.asyncDispose`.
 
 ## Packages and examples

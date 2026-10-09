@@ -1,0 +1,178 @@
+import { InvalidDependencyError } from './errors.ts';
+import type {
+  FactoryAsync,
+  InferAsync,
+  InferInput,
+  LazyRef,
+  Lifetime,
+  ResolveInputs,
+  Ripple,
+  RippleOptions,
+  Verse,
+} from './types.ts';
+import { isObject } from './utils.ts';
+
+export interface Definition {
+  readonly inputs: Readonly<Record<PropertyKey, unknown>>;
+  readonly invoke: (inputs: Record<PropertyKey, unknown>) => unknown;
+  readonly lifetime: Lifetime;
+  /** 由同步 Verse 声明，结果不能是 Promise。 */
+  readonly synchronous: boolean;
+}
+
+const definitions = new WeakMap<object, Definition>();
+const verses = new WeakMap<object, { async: boolean }>();
+const lazies = new WeakMap<object, () => Ripple | Verse>();
+const lifetimes: readonly Lifetime[] = ['singleton', 'scoped', 'transient'];
+
+function ripple<T, const K extends string, R extends NoInfer<T>>(
+  contract: Verse<T, false, K>,
+  factory: (() => R) & (FactoryAsync<R> extends false ? unknown : never),
+  options?: RippleOptions,
+): Ripple<T, {}, false, K>;
+function ripple<T, const K extends string>(
+  contract: Verse<T, true, K>,
+  factory: () => NoInfer<T> | PromiseLike<NoInfer<T>>,
+  options?: RippleOptions,
+): Ripple<T, {}, true, K>;
+function ripple<
+  T,
+  const K extends string,
+  const D extends Record<PropertyKey, unknown>,
+  R extends NoInfer<T>,
+>(
+  contract: Verse<T, false, K>,
+  deps: D & (FactoryAsync<never, D> extends false ? unknown : never),
+  factory: ((deps: ResolveInputs<D>) => R) & (FactoryAsync<R> extends false ? unknown : never),
+  options?: RippleOptions,
+): Ripple<T, D, false, K>;
+function ripple<T, const K extends string, const D extends Record<PropertyKey, unknown>>(
+  contract: Verse<T, true, K>,
+  deps: D,
+  factory: (deps: ResolveInputs<D>) => NoInfer<T> | PromiseLike<NoInfer<T>>,
+  options?: RippleOptions,
+): Ripple<T, D, true, K>;
+function ripple<const K extends string, T>(
+  key: K,
+  factory: () => T,
+  options?: RippleOptions,
+): Ripple<Awaited<T>, {}, FactoryAsync<T>, K>;
+function ripple<const K extends string, const D extends Record<PropertyKey, unknown>, T>(
+  key: K,
+  deps: D,
+  factory: (deps: ResolveInputs<D>) => T,
+  options?: RippleOptions,
+): Ripple<Awaited<T>, D, FactoryAsync<T, D>, K>;
+
+/** 声明服务：key 或 Verse 契约、可选依赖、工厂和生命周期。 */
+function ripple(keyOrContract: string | Verse, ...args: [unknown, unknown?, unknown?]): Ripple {
+  const contract = isVerse(keyOrContract) ? verses.get(keyOrContract) : undefined;
+  const key = isVerse(keyOrContract) ? keyOrContract.key : keyOrContract;
+
+  const [inputs, factory, options = {}] = (
+    typeof args[0] === 'function' ? [{}, ...args] : args
+  ) as [Record<PropertyKey, unknown>, Function, RippleOptions | undefined];
+
+  assertKey(key);
+
+  if (typeof factory !== 'function' || !isObject(inputs) || Array.isArray(inputs)) {
+    throw new InvalidDependencyError('ripple requires optional inputs and a factory');
+  }
+
+  const lifetime = assertLifetime(options.lifetime);
+
+  const call = (values: Record<PropertyKey, unknown>) =>
+    Reflect.apply(factory, undefined, typeof args[0] === 'function' ? [] : [values]);
+
+  const declaration = Object.freeze({ key });
+
+  definitions.set(declaration, {
+    inputs: Object.freeze({ ...inputs }),
+    // 异步契约统一返回 Promise，同步抛错也转为拒绝。
+    invoke: contract?.async ? values => Promise.resolve().then(() => call(values)) : call,
+    lifetime,
+    synchronous: contract?.async === false,
+  });
+
+  return declaration;
+}
+
+export { ripple };
+
+/** 声明同步契约：实现必须同步返回。 */
+export function verse<T, const K extends string = string>(key: K): Verse<T, false, K> {
+  return createVerse(key, false);
+}
+
+/** 声明异步契约：解析结果统一为 Promise。 */
+export function verseAsync<T, const K extends string = string>(key: K): Verse<T, true, K> {
+  return createVerse(key, true);
+}
+
+function createVerse(key: string, async: boolean): Verse<never, never, never> {
+  assertKey(key);
+  const reference = Object.freeze({ key });
+  verses.set(reference, { async });
+
+  return reference as Verse<never, never, never>;
+}
+
+/** 延迟依赖：注入带 resolve() 的句柄，回调可引用后定义的声明。 */
+export function lazy<D extends Ripple | Verse>(
+  getTarget: () => D,
+): LazyRef<InferInput<D>, InferAsync<D>> {
+  const reference = Object.freeze({});
+  lazies.set(reference, getTarget);
+
+  return reference;
+}
+
+export function isRipple(value: unknown): value is Ripple {
+  return isObject(value) && definitions.has(value);
+}
+
+export function isVerse(value: unknown): value is Verse {
+  return isObject(value) && verses.has(value);
+}
+
+export function isVerseAsync(value: Verse): boolean {
+  return verses.get(value)?.async === true;
+}
+
+export function isLazy(value: unknown): value is LazyRef {
+  return isObject(value) && lazies.has(value);
+}
+
+export function getDefinition(value: Ripple): Definition {
+  const definition = definitions.get(value);
+
+  if (!definition) {
+    throw new InvalidDependencyError('Expected a Ripple declaration');
+  }
+
+  return definition;
+}
+
+export function getLazyTarget(value: LazyRef): Ripple | Verse {
+  const target = lazies.get(value)?.();
+
+  if (!isRipple(target) && !isVerse(target)) {
+    throw new InvalidDependencyError('lazy() must return a Ripple or Verse');
+  }
+
+  return target;
+}
+
+function assertLifetime(lifetime: Lifetime = 'singleton'): Lifetime {
+  if (!lifetimes.includes(lifetime)) {
+    throw new InvalidDependencyError(`Unknown lifetime: ${String(lifetime)}`);
+  }
+
+  return lifetime;
+}
+
+function assertKey(key: unknown): asserts key is string {
+  if (typeof key !== 'string' || key.length === 0) {
+    throw new InvalidDependencyError('Key must be a non-empty string');
+  }
+}

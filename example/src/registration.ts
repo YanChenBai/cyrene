@@ -14,23 +14,23 @@ export async function runRegistration(): Promise<void> {
 
   try {
     const Config = ripple('config', () => ({ label: 'configured' }));
-    const External = ripple('external', () => external, { ownership: 'borrowed' });
+    const External = ripple('external', () => ({ name: external.name }));
     const Service = ripple('service', { config: Config, external: External }, deps => deps);
     await using app = new Cyrene();
 
     app.use(Config, External);
-    // 接住返回值才会给新变量增加 service 的属性类型提示。
+    // 接收返回的容器，保留新增服务入口的类型。
     const registered = app.use(Service);
     const byDeclaration = app.resolve(Service);
     const byKey = app.resolve('service'); // unknown, 原 app 的泛型未改变
     assert.equal(registered.ripples.service, byDeclaration);
     assert.equal(byKey, byDeclaration);
-    assert.equal(byDeclaration.external, external);
+    assert.equal(byDeclaration.external.name, external.name);
     process.stdout.write(
       `分步注册: ${byDeclaration.config.label}, ${byDeclaration.external.name}\n`,
     );
   } finally {
-    // borrowed 资源的关闭责任仍属于应用。
+    // 注入不含释放协议的业务接口，由应用自行关闭资源。
     assert.equal(released, false);
     external[Symbol.dispose]();
   }

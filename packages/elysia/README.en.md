@@ -55,7 +55,7 @@ Install `elysiaCyrene()` before calling `useRipples()`.
 - Synchronous entries return instances; asynchronous entries return promises. Use `async` / `await` in async routes.
 - Repeated `useRipples()` calls accumulate entry types. The same declaration can be registered again; different declarations cannot share a key.
 - Indirect dependencies are collected automatically. Only explicitly registered entries appear on `ripples`.
-- The first resolution locks the graph. Complete registration and `cyrene.override()` before handling requests.
+- Registration and `cyrene.override()` work at any time. An override ends the target and its dependents, which are recreated on the next read.
 - `ripples` is a read-only property view. Do not enumerate services through `Object.keys()`, object spread, or JSON serialization. Inspect the graph with `cyrene.inspect()`.
 
 See the [core documentation](../cyrenex/README.en.md) for declarations and dependencies.
@@ -90,10 +90,20 @@ Separate calls to `elysiaCyrene()` create separate containers for separate appli
 ## Lifecycle
 
 The default `singleton` lifetime shares instances within the container, including async initialization started by concurrent requests.
-`transient` creates an instance for each property read, **not one instance per request**. Its disposable resources remain held until container shutdown.
+`transient` creates an instance for each property read, **not one instance per request**.
+
+`ripples` resolves from the root container, so `scoped` services read through it behave like singletons. For per-request instances, create a scope and close it when the request ends:
+
+```ts
+const app = new Elysia()
+  .use(container)
+  .derive(() => ({ scope: container.decorator.cyrene.scope() }))
+  .onAfterResponse(({ scope }) => scope.dispose())
+  .get('/', ({ scope }) => scope.resolve(Session).user);
+```
 
 The plugin's `onStop` hook calls `cyrene.dispose()` to release resources implementing `Symbol.dispose` or `Symbol.asyncDispose`.
-Disposal order, borrowed resources, and pending initialization follow the core rules.
+Disposal order and pending initialization follow the core rules.
 
 Whether an Elysia adapter waits for async stop hooks depends on the adapter. To await cleanup and catch disposal errors explicitly:
 

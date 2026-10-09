@@ -56,7 +56,7 @@ const Cache = ripple('cache', { logger: Logger }, ({ logger }) => {
   };
 });
 
-// Users 和 Catalog 共享 Database、Cache 与 Logger, 形成多条菱形依赖路径。
+// Users 和 Catalog 通过多条依赖路径共享 Database、Cache 和 Logger。
 const Users = ripple(
   'users',
   { database: Database, cache: Cache, logger: Logger },
@@ -140,7 +140,7 @@ export async function runBasic(): Promise<void> {
     ripple('demoConfig', () => ({ databaseUrl: 'memory://configured', prefix: 'demo' })),
   );
 
-  // 以业务入口为根展示多层关系, inspect 和 formatGraph 不会创建服务。
+  // 从业务入口查看依赖，inspect() 和 formatGraph() 均不会创建实例。
   write(formatGraph(app.inspect()));
   const dashboard = app.ripples.dashboard;
   dashboard.render();

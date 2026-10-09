@@ -72,7 +72,7 @@ test('shares an async singleton across composed routes and concurrent requests',
   await plugin.decorator.cyrene.dispose();
 });
 
-test('preserves transient resolution and rejects changes after the first resolution', async () => {
+test('preserves transient resolution and allows registration after resolution', async () => {
   let count = 0;
   const Value = ripple('value', () => ++count, { lifetime: 'transient' });
 
@@ -83,7 +83,15 @@ test('preserves transient resolution and rejects changes after the first resolut
 
   expect(await (await app.handle(request())).json()).toEqual([1, 2]);
   expect(await (await app.handle(request())).json()).toEqual([3, 4]);
-  expect(() => app.use(useRipples(Value))).toThrow('Registrations are locked');
+  expect(() =>
+    app.use(
+      useRipples(
+        Value,
+        ripple('late', () => 'late'),
+      ),
+    ),
+  ).not.toThrow();
+  expect(app.decorator.cyrene.resolve('late')).toBe('late');
   expect(Reflect.set(app.decorator.ripples, 'value', 100)).toBe(false);
   await app.decorator.cyrene.dispose();
 });

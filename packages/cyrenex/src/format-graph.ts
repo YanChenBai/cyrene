@@ -1,105 +1,76 @@
-import type { DependencyGraph, GraphEdge } from './types.ts';
+import type { DependencyGraph } from './types.ts';
 
-/** 将诊断快照格式化为终端树形文本；共享节点与循环显示引用标记，不重复展开。 */
+/**
+ * 将依赖图快照渲染为终端树。
+ *
+ * 已展开的共享节点标记为 ↗，循环引用标记为 ↻。
+ */
 export function formatGraph(graph: DependencyGraph): string {
-  if (graph.nodes.length === 0) {
+  if (!graph.nodes.length) {
     return '(empty graph)';
   }
 
-  const nodes = new Map(graph.nodes.map(node => [node.key, node]));
-  const adjacency = new Map<string, GraphEdge[]>();
+  const children = new Map<string, DependencyGraph['edges']>();
 
   for (const edge of graph.edges) {
-    const children = adjacency.get(edge.from) ?? [];
-    children.push(edge);
-    adjacency.set(edge.from, children);
+    children.set(edge.from, [...(children.get(edge.from) ?? []), edge]);
   }
 
-  const lines: string[] = [];
   const expanded = new Set<string>();
-  const active = new Set<string>();
+  const blocks: string[][] = [];
 
-  /** 渲染一条节点引用及其子边；前缀携带祖先缩进，active 区分循环与普通共享。 */
-  function visit(id: string, prefix: string, connector: string, kind?: GraphEdge['kind']): void {
-    const node = nodes.get(id);
+  const visit = (
+    key: string,
+    prefix: string,
+    label: string,
+    lines: string[],
+    path: Set<string>,
+  ) => {
+    let marker = expanded.has(key) ? '↗ ' : '';
 
-    if (!node) {
-      throw new Error(`Unknown graph node: ${id}`);
-    }
-
-    let marker = '';
-
-    if (active.has(id)) {
+    if (path.has(key)) {
       marker = '↻ ';
-    } else if (expanded.has(id)) {
-      marker = '↗ ';
     }
 
-    const name = sanitizeKey(node.key);
-    const suffix = kind === 'lazy' ? ' [lazy]' : '';
-    lines.push(`${prefix}${connector}${marker}${name}${suffix}`);
+    lines.push(`${label}${marker}${sanitize(key)}`);
 
-    // 共享节点与延迟环只展示引用标记，避免重复展开。
     if (marker) {
       return;
     }
 
-    expanded.add(id);
-    active.add(id);
-    const children = adjacency.get(id) ?? [];
-    const indentation: Record<string, string> = { '': '', '└─ ': '   ', '├─ ': '│  ' };
-    const childPrefix = prefix + indentation[connector];
+    expanded.add(key);
+    path.add(key);
+    const edges = children.get(key) ?? [];
 
-    children.forEach((edge, index) => {
-      let connector = '├─ ';
-
-      if (index === children.length - 1) {
-        connector = '└─ ';
-      }
-
-      visit(edge.to, childPrefix, connector, edge.kind);
+    edges.forEach((edge, index) => {
+      const last = index === edges.length - 1;
+      const suffix = edge.kind === 'lazy' ? ' [lazy]' : '';
+      const before = lines.length;
+      visit(edge.to, prefix + (last ? '   ' : '│  '), prefix + (last ? '└─ ' : '├─ '), lines, path);
+      lines[before] += suffix;
     });
 
-    active.delete(id);
+    path.delete(key);
+  };
+
+  for (const key of [...graph.roots, ...graph.nodes.map(node => node.key)]) {
+    if (!expanded.has(key)) {
+      const lines: string[] = [];
+      visit(key, '', '', lines, new Set());
+      blocks.push(lines);
+    }
   }
 
-  for (const id of graph.roots) {
-    if (lines.length) {
-      lines.push('');
-    }
-
-    visit(id, '', '');
-  }
-
-  // 兼容 roots 仅包含部分节点的外部诊断快照。
-  for (const node of graph.nodes) {
-    if (expanded.has(node.key)) {
-      continue;
-    }
-
-    if (lines.length) {
-      lines.push('');
-    }
-
-    visit(node.key, '', '');
-  }
-
-  return lines.join('\n');
+  return blocks.map(lines => lines.join('\n')).join('\n\n');
 }
 
-/** 清除终端序列及剩余控制字符，避免节点名称改变终端状态。 */
-function sanitizeKey(key: string): string {
-  // 有意匹配终端控制码；OSC 等字符串序列连同标题、链接等负载一起移除。
+/** 移除 key 中的终端转义序列与控制字符。 */
+function sanitize(key: string): string {
   /* oxlint-disable no-control-regex */
-  const strings =
-    /(?:\u001B[P\]X^_]|[\u0090\u0098\u009D-\u009F])[\s\S]*?(?:\u0007|\u001B\\|\u009C|$)/g;
-
-  const sequences = /(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]|\u001B[ -/]*[0-~]/g;
-  /* oxlint-enable no-control-regex */
-
   return key
-    .replace(strings, '')
-    .replace(sequences, '')
+    .replace(/\u001B\][\s\S]*?(?:\u0007|\u001B\|$)/g, '')
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]|\u001B[ -/]*[0-~]/g, '')
     .replace(/[\r\n\t]/g, ' ')
     .replace(/\p{Cc}/gu, '');
+  /* oxlint-enable no-control-regex */
 }
